@@ -4,12 +4,17 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "dev:frontend": "next dev --turbopack",
+    "dev:backend": "cd backend && poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.3",
+    "@tanstack/react-query": "^5.86.0",
+    "axios": "^1.11.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.542.0",
@@ -21,6 +26,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
+    "@tanstack/react-query-devtools": "^5.86.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import {
   Menu,
   Plus,
@@ -16,6 +16,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { useDocumentWorkflow, useAskQuestion, useDocumentClauses } from "@/hooks/useDocuments";
+import { generateRiskHeatmap, getTopRiskyClauses, formatProcessingMessage, isDocumentReady } from "@/lib/api";
+import type { ClauseSummary, AnswerResponse } from "@/lib/api";
 
 // ChatGPT-like dashboard for legal document assistant
 // - Left: sidebar with New Chat, Upload, Recent Docs + search
@@ -26,7 +29,7 @@ export const Dashboard = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [messages, setMessages] = useState<
-    { id: string; role: "user" | "assistant"; content: string }[]
+    { id: string; role: "user" | "assistant"; content: string; isLoading?: boolean }[]
   >([
     {
       id: "m1",
@@ -39,14 +42,22 @@ export const Dashboard = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [recentDocs, setRecentDocs] = useState<
-    { id: string; name: string; date: string }[]
-  >([
-    { id: "d1", name: "Rental_Agreement.pdf", date: "2025-08-28" },
-    { id: "d2", name: "Loan_Contract.pdf", date: "2025-08-15" },
-    { id: "d3", name: "SaaS_ToS.docx", date: "2025-07-22" },
-  ]);
+    { id: string; name: string; date: string; status?: string }[]
+  >([]);
   const [docQuery, setDocQuery] = useState("");
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
+  const [currentDocId, setCurrentDocId] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  // API hooks
+  const { upload: uploadDocument } = useDocumentWorkflow();
+  const askQuestionMutation = useAskQuestion();
+  
+  // Get clauses for the current document
+  const { data: clauses = [], isLoading: clausesLoading } = useDocumentClauses(
+    currentDocId,
+    !!currentDocId
+  );
 
   const filteredDocs = recentDocs.filter((d) =>
     d.name.toLowerCase().includes(docQuery.toLowerCase())
@@ -56,15 +67,70 @@ export const Dashboard = () => {
     fileInputRef.current?.click();
   }
 
-  function handleFilesSelected(files: FileList | null) {
+  async function handleFilesSelected(files: FileList | null) {
     if (!files || files.length === 0) return;
-    const added = Array.from(files).map((f, i) => ({
-      id: `u-${Date.now()}-${i}`,
-      name: f.name,
-      date: new Date().toISOString().slice(0, 10),
-    }));
-    setRecentDocs((prev) => [...added, ...prev]);
-    setSelectedDocs((prev) => [...added.map((a) => a.id), ...prev]);
+    
+    setIsUploading(true);
+    
+    try {
+      // For now, handle single file upload (can be extended for multiple files)
+      const file = files[0];
+      
+      // Add upload status message
+      const uploadMsg = {
+        id: `upload-${Date.now()}`,
+        role: "assistant" as const,
+        content: `Uploading ${file.name}... This may take a moment.`,
+        isLoading: true,
+      };
+      setMessages((prev) => [...prev, uploadMsg]);
+      
+      // Upload the document
+      const response = await uploadDocument.mutateAsync({ 
+        file, 
+        sessionId: `session-${Date.now()}` 
+      });
+      
+      // Add the document to recent docs
+      const newDoc = {
+        id: response.doc_id,
+        name: response.filename,
+        date: new Date().toISOString().slice(0, 10),
+        status: response.status,
+      };
+      
+      setRecentDocs((prev) => [newDoc, ...prev]);
+      setSelectedDocs([response.doc_id]);
+      setCurrentDocId(response.doc_id);
+      
+      // Update message to show processing started
+      setMessages((prev) => 
+        prev.map((msg) => 
+          msg.id === uploadMsg.id 
+            ? {
+                ...msg,
+                content: `${response.filename} uploaded successfully! Processing document...`,
+                isLoading: false,
+              }
+            : msg
+        )
+      );
+      
+    } catch (error: unknown) {
+      console.error('Upload failed:', error);
+      
+      // Show error message
+      setMessages((prev) => [
+        ...prev.filter(msg => !msg.isLoading),
+        {
+          id: `error-${Date.now()}`,
+          role: "assistant",
+          content: `Sorry, there was an error uploading your document: ${(error as any)?.response?.data?.detail || (error as Error)?.message || 'Unknown error'}`,
+        },
+      ]);
+    } finally {
+      setIsUploading(false);
+    }
   }
 
   function toggleSelectDoc(id: string) {
@@ -90,38 +156,93 @@ export const Dashboard = () => {
     setChatInput("");
   }
 
-  function sendMessage() {
+  async function sendMessage() {
     const content = chatInput.trim();
     if (!content) return;
+    
+    // Check if we have a document selected
+    if (!currentDocId) {
+      const errorMsg = {
+        id: `error-${Date.now()}`,
+        role: "assistant" as const,
+        content: "Please upload and select a document first before asking questions.",
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+      return;
+    }
+    
     const userMsg = { id: `u-${Date.now()}`, role: "user" as const, content };
+    const loadingMsg = {
+      id: `loading-${Date.now()}`,
+      role: "assistant" as const,
+      content: "Analyzing your question and searching through the document...",
+      isLoading: true,
+    };
+    
     // Immediate optimistic render
-    setMessages((prev) => [...prev, userMsg]);
+    setMessages((prev) => [...prev, userMsg, loadingMsg]);
     setChatInput("");
 
-    // Placeholder assistant response (wire to backend later)
-    const ctx = selectedDocs
-      .map((id) => recentDocs.find((d) => d.id === id)?.name)
-      .filter(Boolean)
-      .join(", ");
-
-    const assistantMsg = {
-      id: `a-${Date.now()}`,
-      role: "assistant" as const,
-      content:
-        ctx
-          ? `Analyzing your question *with context*: ${ctx}.\n\n(Backend hook TBD) Here I would summarize relevant clauses, explain risks, and answer in plain English.`
-          : `(Backend hook TBD) I’ll answer and summarize once a document is selected or uploaded. You can still ask general questions about legal terms.`,
-    };
-    setMessages((prev) => [...prev, assistantMsg]);
+    try {
+      // Ask the question using the API
+      const response = await askQuestionMutation.mutateAsync({
+        doc_id: currentDocId,
+        question: content,
+        session_id: `session-${Date.now()}`,
+      });
+      
+      // Format the response with sources
+      let answerContent = response.answer;
+      if (response.sources && response.sources.length > 0) {
+        answerContent += "\n\n**Sources:**\n";
+        response.sources.forEach((source, index) => {
+          answerContent += `${index + 1}. "${source.snippet}" (Relevance: ${Math.round(source.relevance_score * 100)}%)\n`;
+        });
+      }
+      
+      const assistantMsg = {
+        id: `a-${Date.now()}`,
+        role: "assistant" as const,
+        content: answerContent,
+      };
+      
+      // Replace loading message with actual response
+      setMessages((prev) => 
+        prev.map((msg) => 
+          msg.id === loadingMsg.id ? assistantMsg : msg
+        )
+      );
+      
+    } catch (error: unknown) {
+      console.error('Question failed:', error);
+      
+      const errorMsg = {
+        id: `error-${Date.now()}`,
+        role: "assistant" as const,
+        content: `Sorry, I couldn't process your question: ${(error as any)?.response?.data?.detail || (error as Error)?.message || 'Unknown error'}`,
+      };
+      
+      // Replace loading message with error
+      setMessages((prev) => 
+        prev.map((msg) => 
+          msg.id === loadingMsg.id ? errorMsg : msg
+        )
+      );
+    }
   }
 
-  // Simple risk matrix (placeholder). In real app, fill from model output.
-  const riskMatrix = [
-    [0.2, 0.4, 0.1, 0.6, 0.8, 0.3],
-    [0.1, 0.5, 0.7, 0.2, 0.4, 0.9],
-    [0.3, 0.2, 0.6, 0.5, 0.7, 0.4],
-    [0.6, 0.8, 0.2, 0.3, 0.5, 0.7],
-  ];
+  // Generate risk matrix from actual clause data
+  const riskMatrix = generateRiskHeatmap(clauses);
+  const topRiskyClauses = getTopRiskyClauses(clauses);
+  
+  // Update current document when selection changes
+  useEffect(() => {
+    if (selectedDocs.length > 0) {
+      setCurrentDocId(selectedDocs[0]);
+    } else {
+      setCurrentDocId(null);
+    }
+  }, [selectedDocs]);
 
   return (
     <div className="flex h-screen w-full bg-[#0B0B0B] text-white antialiased">
@@ -194,7 +315,9 @@ export const Dashboard = () => {
                     <FileText className="h-4 w-4 text-white/70" />
                     <div>
                       <div className="text-sm leading-tight">{doc.name}</div>
-                      <div className="text-[10px] text-white/50">{doc.date}</div>
+                      <div className="text-[10px] text-white/50">
+                        {doc.date} {doc.status && `• ${doc.status}`}
+                      </div>
                     </div>
                   </div>
                   <div
@@ -233,7 +356,16 @@ export const Dashboard = () => {
                       <div className="mb-2 flex items-center gap-2 text-white/70">
                         <MessageSquare className="h-4 w-4" /> Assistant
                       </div>
-                      <div className="whitespace-pre-wrap">{m.content}</div>
+                      <div className="whitespace-pre-wrap">
+                        {m.content}
+                        {m.isLoading && (
+                          <div className="mt-2 flex items-center gap-2">
+                            <div className="h-2 w-2 bg-purple-400 rounded-full animate-pulse"></div>
+                            <div className="h-2 w-2 bg-purple-400 rounded-full animate-pulse delay-75"></div>
+                            <div className="h-2 w-2 bg-purple-400 rounded-full animate-pulse delay-150"></div>
+                          </div>
+                        )}
+                      </div>
                     </CardContent>
                   </Card>
                 </div>
@@ -300,8 +432,12 @@ export const Dashboard = () => {
                 placeholder="Ask about clauses, risks, or a plain-English summary…"
                 className="flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none placeholder:text-white/40"
               />
-              <Button onClick={sendMessage}>
-                <Send className="mr-2 h-4 w-4" /> Send
+              <Button 
+                onClick={sendMessage}
+                disabled={!chatInput.trim() || askQuestionMutation.isPending}
+              >
+                <Send className="mr-2 h-4 w-4" /> 
+                {askQuestionMutation.isPending ? "Asking..." : "Send"}
               </Button>
             </div>
           </div>
@@ -342,11 +478,7 @@ export const Dashboard = () => {
         {/* Top risky clauses (placeholder) */}
         <div className="mt-6 space-y-2">
           <div className="text-xs uppercase tracking-wide text-white/60">Top clauses</div>
-          {[
-            { k: "Termination without cause", risk: 0.86 },
-            { k: "Unilateral fee change", risk: 0.78 },
-            { k: "Broad indemnity", risk: 0.72 },
-          ].map((c) => (
+          {topRiskyClauses.length > 0 ? topRiskyClauses.map((c) => (
             <div
               key={c.k}
               className="flex items-center justify-between rounded-lg border border-white/10 bg-[#0F0F0F] px-3 py-2"
@@ -354,7 +486,11 @@ export const Dashboard = () => {
               <div className="text-sm">{c.k}</div>
               <div className="text-xs text-white/60">{Math.round(c.risk * 100)}%</div>
             </div>
-          ))}
+          )) : (
+            <div className="text-xs text-white/50 p-3">
+              {clausesLoading ? "Loading risk analysis..." : "Upload a document to see risk analysis"}
+            </div>
+          )}
         </div>
       </aside>
     </div>
