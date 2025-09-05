@@ -352,103 +352,105 @@ export const Dashboard = () => {
     .filter(Boolean);
 
   return (
-    <div className="flex h-screen w-full bg-[#0B0B0B] text-white antialiased">
+    <div className="flex h-screen w-full bg-[#0B0B0B] text-white antialiased overflow-hidden">
       {/* Left Sidebar */}
       <aside
         className={`${
           sidebarOpen ? "flex" : "hidden"
-        } md:flex w-72 shrink-0 flex-col border-r border-white/10 bg-[#111111] p-4 gap-4`}
+        } md:flex w-72 shrink-0 flex-col border-r border-white/10 bg-[#111111] h-full overflow-hidden`}
       >
-        {/* Brand + Mobile toggle */}
-        <div className="flex items-center justify-between">
-          <div className="text-xl font-semibold bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
-            LegalEase AI
-          </div>
-          <Button
-            className="md:hidden"
-            variant="ghost"
-            size="icon"
-            onClick={() => setSidebarOpen(false)}
-          >
-            <Menu className="h-5 w-5" />
-          </Button>
-        </div>
-
-        <div className="flex gap-2">
-          <Button className="flex-1" onClick={newChat}>
-            <Plus className="mr-2 h-4 w-4" /> New Chat
-          </Button>
-          <Button variant="secondary" onClick={handleUploadClick}>
-            <Upload className="mr-2 h-4 w-4" /> Upload
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            multiple
-            onChange={(e) => handleFilesSelected(e.target.files)}
-          />
-        </div>
-
-        <div className="mt-2">
-          <label className="text-xs uppercase tracking-wide text-white/60">
-            Recent documents
-          </label>
-          <div className="mt-2 flex items-center gap-2">
-            <Input
-              placeholder="Search documents"
-              value={docQuery}
-              onChange={(e) => setDocQuery(e.target.value)}
-              className="bg-[#0F0F0F] border-white/10"
-            />
+        <div className="p-4 flex flex-col gap-4 h-full overflow-hidden">
+          {/* Brand + Mobile toggle */}
+          <div className="flex items-center justify-between shrink-0">
+            <div className="text-xl font-semibold bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
+              LegalEase AI
+            </div>
             <Button
+              className="md:hidden"
               variant="ghost"
               size="icon"
-              className="border border-white/10"
+              onClick={() => setSidebarOpen(false)}
             >
-              <Search className="h-4 w-4" />
+              <Menu className="h-5 w-5" />
             </Button>
           </div>
 
-          <div className="mt-3 overflow-y-auto max-h-[56vh] pr-1 space-y-1">
-            {filteredDocs.length === 0 && (
-              <div className="text-xs text-white/50">No documents found.</div>
-            )}
-            {filteredDocs.map((doc) => {
-              const checked = selectedDocs.includes(doc.id);
-              return (
-                <button
-                  key={doc.id}
-                  onClick={() => toggleSelectDoc(doc.id)}
-                  className={`group flex w-full items-center justify-between rounded-lg border border-white/5 bg-[#0F0F0F] px-3 py-2 text-left hover:border-white/20 ${
-                    checked ? "ring-1 ring-purple-500/50" : ""
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-white/70" />
-                    <div>
-                      <div className="text-sm leading-tight">{doc.name}</div>
-                      <div className="text-[10px] text-white/50">
-                        {doc.date} {doc.status && `• ${doc.status}`}
+          <div className="flex gap-2 shrink-0">
+            <Button className="flex-1" onClick={newChat}>
+              <Plus className="mr-2 h-4 w-4" /> New Chat
+            </Button>
+            <Button variant="secondary" onClick={handleUploadClick}>
+              <Upload className="mr-2 h-4 w-4" /> Upload
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              multiple
+              onChange={(e) => handleFilesSelected(e.target.files)}
+            />
+          </div>
+
+          <div className="flex flex-col min-h-0 flex-1">
+            <label className="text-xs uppercase tracking-wide text-white/60 shrink-0">
+              Recent documents
+            </label>
+            <div className="mt-2 flex items-center gap-2 shrink-0">
+              <Input
+                placeholder="Search documents"
+                value={docQuery}
+                onChange={(e) => setDocQuery(e.target.value)}
+                className="bg-[#0F0F0F] border-white/10"
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="border border-white/10"
+              >
+                <Search className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="mt-3 overflow-y-auto flex-1 pr-1 space-y-1">
+              {filteredDocs.length === 0 && (
+                <div className="text-xs text-white/50">No documents found.</div>
+              )}
+              {filteredDocs.map((doc) => {
+                const checked = selectedDocs.includes(doc.id);
+                return (
+                  <button
+                    key={doc.id}
+                    onClick={() => toggleSelectDoc(doc.id)}
+                    className={`group flex w-full items-center justify-between rounded-lg border border-white/5 bg-[#0F0F0F] px-3 py-2 text-left hover:border-white/20 ${
+                      checked ? "ring-1 ring-purple-500/50" : ""
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-white/70" />
+                      <div>
+                        <div className="text-sm leading-tight">{doc.name}</div>
+                        <div className="text-[10px] text-white/50">
+                          {doc.date} {doc.status && `• ${doc.status}`}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div
-                    className={`h-3 w-3 rounded-full ${
-                      checked ? "bg-purple-500" : "bg-white/20"
-                    }`}
-                  />
-                </button>
-              );
-            })}
+                    <div
+                      className={`h-3 w-3 rounded-full ${
+                        checked ? "bg-purple-500" : "bg-white/20"
+                      }`}
+                    />
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       </aside>
 
       {/* Center Chat Column */}
-      <section className="flex min-w-0 flex-1 flex-col items-center">
+      <section className="flex min-w-0 flex-1 flex-col bg-[#0B0B0B] h-full overflow-hidden">
         {/* Mobile top bar */}
-        <div className="flex w-full items-center justify-between border-b border-white/10 bg-[#111111] px-4 py-3 md:hidden">
+        <div className="flex w-full items-center justify-between border-b border-white/10 bg-[#111111] px-4 py-3 md:hidden shrink-0">
           <Button
             variant="ghost"
             size="icon"
@@ -462,8 +464,8 @@ export const Dashboard = () => {
           <div className="w-9" />
         </div>
 
-        {/* Chat Interface */}
-        <div className="flex-1 w-full max-w-3xl">
+        {/* Chat Interface - Independent Scroll Area */}
+        <div className="flex-1 w-full max-w-3xl mx-auto bg-[#0B0B0B] h-full overflow-hidden">
           <ChatInterface
             messages={messages}
             onSendMessage={sendMessage}
@@ -480,70 +482,76 @@ export const Dashboard = () => {
       </section>
 
       {/* Right Heatmap Panel */}
-      <aside className="hidden xl:flex w-80 shrink-0 flex-col border-l border-white/10 bg-[#111111] p-4">
-        <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-white/70">
-          <Flame className="h-4 w-4 text-red-500" /> Risk Heatmap
-        </h3>
+      <aside className="hidden xl:flex w-80 shrink-0 flex-col border-l border-white/10 bg-[#111111] h-full overflow-hidden">
+        <div className="p-4 flex flex-col h-full overflow-hidden">
+          <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-white/70 shrink-0">
+            <Flame className="h-4 w-4 text-red-500" /> Risk Heatmap
+          </h3>
 
-        {/* Document info */}
-        {currentDocId && (
-          <div className="mb-4 p-2 rounded-lg bg-[#0F0F0F] border border-white/10">
-            <div className="text-xs text-white/60">Document</div>
-            <div className="text-sm text-white/90">
-              {recentDocs.find((d) => d.id === currentDocId)?.name ||
-                "Loading..."}
-            </div>
-            <div className="text-xs text-white/50">
-              {clauses.length} clauses analyzed
-            </div>
-          </div>
-        )}
-
-        {/* Risk Heatmap */}
-        <RiskHeatmap
-          clauses={clauses || []}
-          isLoading={clausesLoading}
-          error={clausesError}
-        />
-
-        {/* Top risky clauses */}
-        <div className="mt-6 space-y-2">
-          <div className="text-xs uppercase tracking-wide text-white/60">
-            Top risky clauses ({topRiskyClauses.length})
-          </div>
-          {clausesLoading ? (
-            <div className="space-y-2">
-              {[...Array(3)].map((_, i) => (
-                <div key={i} className="animate-pulse">
-                  <div className="h-8 bg-gray-700 rounded-lg"></div>
-                </div>
-              ))}
-            </div>
-          ) : clausesError ? (
-            <div className="text-xs text-red-400 p-3">
-              Failed to load clause analysis. Please refresh or try again.
-            </div>
-          ) : topRiskyClauses.length > 0 ? (
-            topRiskyClauses.map((c, index) => (
-              <div
-                key={c.clauseId || `${c.k}-${index}`}
-                className="flex items-center justify-between rounded-lg border border-white/10 bg-[#0F0F0F] px-3 py-2 hover:border-white/20 transition-colors"
-              >
-                <div className="text-sm truncate">{c.k}</div>
-                <div className="text-xs text-white/60 ml-2">
-                  {Math.round(c.risk * 100)}%
-                </div>
+          {/* Document info */}
+          {currentDocId && (
+            <div className="mb-4 p-2 rounded-lg bg-[#0F0F0F] border border-white/10 shrink-0">
+              <div className="text-xs text-white/60">Document</div>
+              <div className="text-sm text-white/90">
+                {recentDocs.find((d) => d.id === currentDocId)?.name ||
+                  "Loading..."}
               </div>
-            ))
-          ) : (
-            <div className="text-xs text-white/50 p-3">
-              {currentDocId && clausesSuccess && clauses.length === 0
-                ? "No clauses found in document"
-                : currentDocId
-                ? "No high-risk clauses found"
-                : "Upload a document to see risk analysis"}
+              <div className="text-xs text-white/50">
+                {clauses.length} clauses analyzed
+              </div>
             </div>
           )}
+
+          {/* Risk Heatmap */}
+          <div className="shrink-0">
+            <RiskHeatmap
+              clauses={clauses || []}
+              isLoading={clausesLoading}
+              error={clausesError}
+            />
+          </div>
+
+          {/* Top risky clauses */}
+          <div className="mt-6 flex flex-col min-h-0 flex-1">
+            <div className="text-xs uppercase tracking-wide text-white/60 shrink-0">
+              Top risky clauses ({topRiskyClauses.length})
+            </div>
+            <div className="mt-2 overflow-y-auto flex-1 space-y-2">
+              {clausesLoading ? (
+                <div className="space-y-2">
+                  {[...Array(3)].map((_, i) => (
+                    <div key={i} className="animate-pulse">
+                      <div className="h-8 bg-gray-700 rounded-lg"></div>
+                    </div>
+                  ))}
+                </div>
+              ) : clausesError ? (
+                <div className="text-xs text-red-400 p-3">
+                  Failed to load clause analysis. Please refresh or try again.
+                </div>
+              ) : topRiskyClauses.length > 0 ? (
+                topRiskyClauses.map((c, index) => (
+                  <div
+                    key={c.clauseId || `${c.k}-${index}`}
+                    className="flex items-center justify-between rounded-lg border border-white/10 bg-[#0F0F0F] px-3 py-2 hover:border-white/20 transition-colors"
+                  >
+                    <div className="text-sm truncate">{c.k}</div>
+                    <div className="text-xs text-white/60 ml-2">
+                      {Math.round(c.risk * 100)}%
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-xs text-white/50 p-3">
+                  {currentDocId && clausesSuccess && clauses.length === 0
+                    ? "No clauses found in document"
+                    : currentDocId
+                    ? "No high-risk clauses found"
+                    : "Upload a document to see risk analysis"}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </aside>
     </div>

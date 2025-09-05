@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     )
     VERTEX_AI_LOCATION: str = Field(default="us-central1", description="Vertex AI location")
     
+    # Google Generative AI settings (for embeddings)
+    GOOGLE_GENAI_API_KEY: str = Field(description="Google Generative AI API key")
+    
     # Firestore settings
     FIRESTORE_DATABASE: str = Field(default="(default)", description="Firestore database ID")
     
@@ -104,6 +107,12 @@ class Settings(BaseSettings):
     def doc_ai_processor_id_required(cls, v):
         if not v:
             raise ValueError("DOC_AI_PROCESSOR_ID is required")
+        return v
+    
+    @validator("GOOGLE_GENAI_API_KEY")
+    def google_genai_api_key_required(cls, v):
+        if not v:
+            raise ValueError("GOOGLE_GENAI_API_KEY is required")
         return v
     
     @validator("ALLOWED_ORIGINS", pre=True)

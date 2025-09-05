@@ -154,9 +154,9 @@ export const ChatInterface = ({
   );
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-[#0F0F0F] overflow-hidden">
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-6">
+      <div className="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-6 bg-[#0F0F0F] min-h-0">
         {messages.length === 0 && !isProcessing && (
           <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
             <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-pink-500 rounded-2xl flex items-center justify-center">
@@ -241,7 +241,11 @@ export const ChatInterface = ({
                                     Source {idx + 1}
                                   </span>
                                   <span className="text-purple-400">
-                                    {Math.round(source.relevance_score * 100)}%
+                                    {source.relevance_score > 0
+                                      ? `${Math.round(
+                                          source.relevance_score * 100
+                                        )}%`
+                                      : "N/A"}
                                   </span>
                                 </div>
                                 <div>&quot;{source.snippet}&quot;</div>
@@ -321,7 +325,7 @@ export const ChatInterface = ({
               <div className="ml-auto max-w-[85%] group">
                 <Card className="bg-gradient-to-br from-[#1a1a1a] to-[#18181B] border-white/10">
                   <CardContent className="p-4">
-                    <div className="flex items-center justify-end gap-2 text-white/60 mb-2">
+                    <div className="flex items-center justify-end gap-2 text-white mb-2">
                       {message.timestamp && (
                         <span className="text-xs text-white/40">
                           {formatTimestamp(message.timestamp)}
@@ -332,7 +336,7 @@ export const ChatInterface = ({
                         <User className="w-3 h-3 text-white" />
                       </div>
                     </div>
-                    <div className="text-sm leading-6 whitespace-pre-wrap">
+                    <div className="text-sm leading-6 whitespace-pre-wrap text-white">
                       {message.content}
                     </div>
 
@@ -374,7 +378,7 @@ export const ChatInterface = ({
       </div>
 
       {/* Context bar and Composer */}
-      <div className="border-t border-white/10 bg-[#0B0B0B] p-4">
+      <div className="border-t border-white/10 bg-[#0B0B0B] p-4 shrink-0">
         {/* Context chips */}
         <div className="mb-3">
           <div className="flex flex-wrap items-center gap-2">
