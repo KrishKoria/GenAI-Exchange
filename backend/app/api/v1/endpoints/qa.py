@@ -5,6 +5,7 @@ import logging
 from typing import Dict, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException
+from google.cloud import firestore
 
 from app.core.config import Settings, get_settings
 from app.models.qa import QuestionRequest, AnswerResponse
@@ -77,13 +78,36 @@ async def get_qa_history(
     Returns:
         List of previous questions and answers
     """
-    # TODO: Query Firestore or BigQuery for Q&A history
-    
-    return [
-        {
-            "timestamp": "2025-01-02T10:30:00Z",
-            "question": "What are the termination conditions?",
-            "answer": "Contract can be terminated with 30 days notice...",
-            "clause_ids": ["c1"]
-        }
-    ]
+    try:
+        db = firestore.Client(
+            project=settings.PROJECT_ID,
+            database=settings.FIRESTORE_DATABASE,
+        )
+
+        query = (
+            db.collection("qa_history")
+            .where("doc_id", "==", doc_id)
+            .order_by("timestamp", direction=firestore.Query.DESCENDING)
+            .limit(limit)
+        )
+
+        results: List[Dict[str, Any]] = []
+        for doc in query.stream():
+            data = doc.to_dict() or {}
+            ts = data.get("timestamp")
+            # Convert Firestore timestamp to ISO string if present
+            if hasattr(ts, "isoformat"):
+                ts = ts.isoformat()
+            results.append(
+                {
+                    "timestamp": ts,
+                    "question": data.get("question", ""),
+                    "answer": data.get("answer", ""),
+                    "clause_ids": data.get("clause_ids", []),
+                }
+            )
+
+        return results
+    except Exception as e:
+        logger.error(f"Failed to fetch Q&A history for {doc_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve Q&A history")

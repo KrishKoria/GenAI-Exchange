@@ -10,7 +10,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 // Create axios instance with default configuration
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30000, // 30 second timeout
+  timeout: 120000, // 2 minutes timeout for document processing
   headers: {
     "Content-Type": "application/json",
   },
@@ -248,15 +248,15 @@ export function generateRiskHeatmap(clauses: ClauseSummary[]): number[][] {
     ];
   }
 
-  // Convert risk levels to numeric values
+  // Convert risk levels to numeric values (0.0 to 1.0)
   const riskValues = clauses.map((clause) => {
     switch (clause.risk_level) {
       case "low":
-        return 0.2;
+        return 0.15;
       case "moderate":
-        return 0.5;
+        return 0.55;
       case "attention":
-        return 0.8;
+        return 0.85;
       default:
         return 0.4;
     }
@@ -264,6 +264,7 @@ export function generateRiskHeatmap(clauses: ClauseSummary[]): number[][] {
 
   // Create 4x6 grid (24 cells) from clause risk data
   const heatmap: number[][] = [];
+
   for (let row = 0; row < 4; row++) {
     const rowData: number[] = [];
     for (let col = 0; col < 6; col++) {
@@ -271,10 +272,10 @@ export function generateRiskHeatmap(clauses: ClauseSummary[]): number[][] {
       if (index < riskValues.length) {
         rowData.push(riskValues[index]);
       } else {
-        // Fill remaining cells with average risk of existing clauses
+        // For extra cells, use average risk of existing clauses
         const avgRisk =
           riskValues.reduce((sum, val) => sum + val, 0) / riskValues.length;
-        rowData.push(avgRisk);
+        rowData.push(Math.min(avgRisk, 0.3)); // Cap at moderate level for filler
       }
     }
     heatmap.push(rowData);
@@ -288,18 +289,32 @@ export function generateRiskHeatmap(clauses: ClauseSummary[]): number[][] {
  */
 export function getTopRiskyClauses(
   clauses: ClauseSummary[],
-  limit: number = 3
+  limit: number = 5
 ) {
+  if (!clauses || clauses.length === 0) {
+    return [];
+  }
+
+  // Sort by risk level (attention first, then moderate)
   return clauses
-    .filter((clause) => clause.risk_level !== "low")
+    .filter(
+      (clause) =>
+        clause.risk_level === "attention" || clause.risk_level === "moderate"
+    )
     .sort((a, b) => {
       const riskOrder = { attention: 3, moderate: 2, low: 1 };
-      return riskOrder[b.risk_level] - riskOrder[a.risk_level];
+      const riskDiff = riskOrder[b.risk_level] - riskOrder[a.risk_level];
+      // If same risk level, sort by category name for consistency
+      if (riskDiff === 0) {
+        return a.category.localeCompare(b.category);
+      }
+      return riskDiff;
     })
     .slice(0, limit)
     .map((clause) => ({
       k: clause.category,
-      risk: clause.risk_level === "attention" ? 0.85 : 0.65,
+      risk: clause.risk_level === "attention" ? 0.85 : 0.55,
+      clauseId: clause.clause_id,
     }));
 }
 

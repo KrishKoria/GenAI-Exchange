@@ -1,0 +1,487 @@
+"use client";
+
+import { useRef, useState, useEffect } from "react";
+import {
+  Send,
+  Paperclip,
+  Bot,
+  User,
+  FileText,
+  Trash2,
+  Copy,
+  ThumbsUp,
+  ThumbsDown,
+  RotateCcw,
+  AlertCircle,
+  CheckCircle,
+  Clock,
+  Loader2,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  timestamp?: Date;
+  isLoading?: boolean;
+  error?: boolean;
+  sources?: Array<{
+    snippet: string;
+    relevance_score: number;
+  }>;
+  feedback?: "positive" | "negative" | null;
+}
+
+export interface SelectedDocument {
+  id: string;
+  name: string;
+  status?: string;
+}
+
+interface ChatInterfaceProps {
+  messages: ChatMessage[];
+  onSendMessage: (content: string) => void;
+  onRetryMessage?: (messageId: string) => void;
+  onFeedback?: (messageId: string, feedback: "positive" | "negative") => void;
+  selectedDocuments: SelectedDocument[];
+  onRemoveDocument: (docId: string) => void;
+  onClearContext: () => void;
+  onUploadClick: () => void;
+  isProcessing?: boolean;
+  placeholder?: string;
+  disabled?: boolean;
+}
+
+export const ChatInterface = ({
+  messages,
+  onSendMessage,
+  onRetryMessage,
+  onFeedback,
+  selectedDocuments,
+  onRemoveDocument,
+  onClearContext,
+  onUploadClick,
+  isProcessing = false,
+  placeholder = "Ask about clauses, risks, or request a plain-English summary…",
+  disabled = false,
+}: ChatInterfaceProps) => {
+  const [input, setInput] = useState("");
+  const [isComposing, setIsComposing] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = "auto";
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
+    }
+  }, [input]);
+
+  const handleSend = () => {
+    const content = input.trim();
+    if (!content || disabled || isProcessing) return;
+
+    setInput("");
+    setIsComposing(false);
+    onSendMessage(content);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const handleCopy = async (messageId: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMessageId(messageId);
+      setTimeout(() => setCopiedMessageId(null), 2000);
+    } catch (error) {
+      console.error("Failed to copy text:", error);
+    }
+  };
+
+  const formatTimestamp = (timestamp?: Date) => {
+    if (!timestamp) return "";
+    return new Intl.DateTimeFormat("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    }).format(timestamp);
+  };
+
+  const renderTypingIndicator = () => (
+    <div className="flex items-center gap-2 text-white/60">
+      <div className="flex gap-1">
+        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" />
+        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce delay-100" />
+        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce delay-200" />
+      </div>
+      <span className="text-sm">Assistant is thinking...</span>
+    </div>
+  );
+
+  const renderMessageSkeleton = () => (
+    <div className="mr-auto max-w-[85%]">
+      <Card className="bg-[#121212] border-white/10">
+        <CardContent className="p-4">
+          <div className="animate-pulse space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-gray-700 rounded"></div>
+              <div className="w-16 h-3 bg-gray-700 rounded"></div>
+            </div>
+            <div className="space-y-2">
+              <div className="w-full h-3 bg-gray-700 rounded"></div>
+              <div className="w-3/4 h-3 bg-gray-700 rounded"></div>
+              <div className="w-1/2 h-3 bg-gray-700 rounded"></div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-6">
+        {messages.length === 0 && !isProcessing && (
+          <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
+            <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-pink-500 rounded-2xl flex items-center justify-center">
+              <Bot className="w-8 h-8 text-white" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-xl font-semibold text-white">
+                Welcome to LegalEase AI
+              </h3>
+              <p className="text-white/60 max-w-md">
+                Upload a legal document and ask me anything. I&apos;ll provide
+                summaries, flag risky clauses, and answer your questions in
+                plain language.
+              </p>
+            </div>
+            <Button
+              onClick={onUploadClick}
+              className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600"
+            >
+              <FileText className="mr-2 h-4 w-4" />
+              Upload Document
+            </Button>
+          </div>
+        )}
+
+        {messages.map((message) => (
+          <div key={message.id} className="flex w-full">
+            {message.role === "assistant" ? (
+              <div className="mr-auto max-w-[85%] group">
+                <Card className="bg-[#121212] border-white/10 hover:border-white/20 transition-colors">
+                  <CardContent className="p-4">
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2 text-white/70">
+                        <div className="w-6 h-6 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                          <Bot className="w-3 h-3 text-white" />
+                        </div>
+                        <span className="text-sm font-medium">Assistant</span>
+                        {message.timestamp && (
+                          <span className="text-xs text-white/40">
+                            {formatTimestamp(message.timestamp)}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Status indicator */}
+                      <div className="flex items-center gap-1">
+                        {message.isLoading ? (
+                          <Loader2 className="w-3 h-3 animate-spin text-purple-400" />
+                        ) : message.error ? (
+                          <AlertCircle className="w-3 h-3 text-red-400" />
+                        ) : (
+                          <CheckCircle className="w-3 h-3 text-green-400" />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Content */}
+                    <div className="text-sm leading-6 text-white/90">
+                      {message.isLoading ? (
+                        renderTypingIndicator()
+                      ) : (
+                        <div className="whitespace-pre-wrap">
+                          {message.content}
+                        </div>
+                      )}
+
+                      {/* Sources */}
+                      {message.sources && message.sources.length > 0 && (
+                        <div className="mt-4 p-3 bg-[#0F0F0F] rounded-lg border border-white/10">
+                          <div className="text-xs font-medium text-white/70 mb-2">
+                            Sources:
+                          </div>
+                          <div className="space-y-2">
+                            {message.sources.map((source, idx) => (
+                              <div
+                                key={idx}
+                                className="text-xs text-white/60 border-l-2 border-purple-500/30 pl-2"
+                              >
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="font-medium">
+                                    Source {idx + 1}
+                                  </span>
+                                  <span className="text-purple-400">
+                                    {Math.round(source.relevance_score * 100)}%
+                                  </span>
+                                </div>
+                                <div>&quot;{source.snippet}&quot;</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Actions */}
+                    {!message.isLoading && (
+                      <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              handleCopy(message.id, message.content)
+                            }
+                            className="h-6 px-2 text-xs"
+                          >
+                            {copiedMessageId === message.id ? (
+                              <CheckCircle className="w-3 h-3" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
+                          </Button>
+
+                          {onRetryMessage && message.error && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => onRetryMessage(message.id)}
+                              className="h-6 px-2 text-xs"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                            </Button>
+                          )}
+                        </div>
+
+                        {/* Feedback buttons */}
+                        {onFeedback && !message.error && (
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => onFeedback(message.id, "positive")}
+                              className={`h-6 px-2 text-xs ${
+                                message.feedback === "positive"
+                                  ? "text-green-400"
+                                  : "text-white/40 hover:text-green-400"
+                              }`}
+                            >
+                              <ThumbsUp className="w-3 h-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => onFeedback(message.id, "negative")}
+                              className={`h-6 px-2 text-xs ${
+                                message.feedback === "negative"
+                                  ? "text-red-400"
+                                  : "text-white/40 hover:text-red-400"
+                              }`}
+                            >
+                              <ThumbsDown className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            ) : message.role === "user" ? (
+              <div className="ml-auto max-w-[85%] group">
+                <Card className="bg-gradient-to-br from-[#1a1a1a] to-[#18181B] border-white/10">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-end gap-2 text-white/60 mb-2">
+                      {message.timestamp && (
+                        <span className="text-xs text-white/40">
+                          {formatTimestamp(message.timestamp)}
+                        </span>
+                      )}
+                      <span className="text-sm font-medium">You</span>
+                      <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-full flex items-center justify-center">
+                        <User className="w-3 h-3 text-white" />
+                      </div>
+                    </div>
+                    <div className="text-sm leading-6 whitespace-pre-wrap">
+                      {message.content}
+                    </div>
+
+                    {/* Copy action for user messages */}
+                    <div className="flex justify-end mt-2 pt-2 border-t border-white/5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleCopy(message.id, message.content)}
+                        className="h-6 px-2 text-xs"
+                      >
+                        {copiedMessageId === message.id ? (
+                          <CheckCircle className="w-3 h-3" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            ) : (
+              // System messages
+              <div className="mx-auto max-w-[75%]">
+                <div className="text-center text-xs text-white/50 bg-[#0F0F0F] px-3 py-2 rounded-full border border-white/10">
+                  {message.content}
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* Show skeleton when processing but no loading message */}
+        {isProcessing &&
+          !messages.some((m) => m.isLoading) &&
+          renderMessageSkeleton()}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Context bar and Composer */}
+      <div className="border-t border-white/10 bg-[#0B0B0B] p-4">
+        {/* Context chips */}
+        <div className="mb-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedDocuments.length > 0 ? (
+              <>
+                <span className="text-xs font-medium text-white/60 uppercase tracking-wide">
+                  Context:
+                </span>
+                {selectedDocuments.map((doc) => (
+                  <div
+                    key={doc.id}
+                    className="inline-flex items-center gap-2 rounded-full border border-purple-500/30 bg-purple-500/10 px-3 py-1 text-xs backdrop-blur-sm"
+                  >
+                    <FileText className="h-3 w-3 text-purple-400" />
+                    <span className="text-white/90">{doc.name}</span>
+                    {doc.status && (
+                      <span className="text-purple-300/60">• {doc.status}</span>
+                    )}
+                    <button
+                      className="ml-1 text-white/60 hover:text-white transition-colors"
+                      onClick={() => onRemoveDocument(doc.id)}
+                      aria-label={`Remove ${doc.name}`}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onClearContext}
+                  className="h-6 px-2 text-xs text-white/60 hover:text-white"
+                >
+                  <Trash2 className="mr-1 h-3 w-3" />
+                  Clear
+                </Button>
+              </>
+            ) : (
+              <div className="text-xs text-white/40">
+                No documents selected. Upload or choose from sidebar.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Composer */}
+        <div className="relative">
+          <div className="rounded-2xl border border-white/20 bg-gradient-to-r from-[#0F0F0F] to-[#1a1a1a] p-3 shadow-lg backdrop-blur-sm">
+            <div className="flex items-end gap-3">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onUploadClick}
+                className="shrink-0 h-8 w-8 text-white/60 hover:text-white hover:bg-white/10"
+                disabled={disabled}
+              >
+                <Paperclip className="h-4 w-4" />
+              </Button>
+
+              <div className="flex-1 relative">
+                <textarea
+                  ref={textareaRef}
+                  rows={1}
+                  value={input}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    setIsComposing(e.target.value.length > 0);
+                  }}
+                  onKeyDown={handleKeyDown}
+                  placeholder={disabled ? "Please wait..." : placeholder}
+                  disabled={disabled || isProcessing}
+                  className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-white/40 text-white max-h-[120px] leading-5"
+                  style={{ minHeight: "20px" }}
+                />
+
+                {/* Character count for long messages */}
+                {input.length > 500 && (
+                  <div className="absolute bottom-0 right-0 text-xs text-white/40">
+                    {input.length}/2000
+                  </div>
+                )}
+              </div>
+
+              <Button
+                onClick={handleSend}
+                disabled={!input.trim() || disabled || isProcessing}
+                className="shrink-0 h-8 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 disabled:from-gray-600 disabled:to-gray-600 transition-all duration-200"
+                size="sm"
+              >
+                {isProcessing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+          </div>
+
+          {/* Typing indicator */}
+          {isComposing && !disabled && (
+            <div className="absolute -top-8 left-3 text-xs text-white/50 bg-[#0F0F0F] px-2 py-1 rounded border border-white/10">
+              <Clock className="w-3 h-3 inline mr-1" />
+              Press Enter to send, Shift+Enter for new line
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};

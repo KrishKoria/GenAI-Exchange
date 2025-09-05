@@ -1,21 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useRef, useState, useEffect } from "react";
-import {
-  Menu,
-  Plus,
-  Upload,
-  Search,
-  FileText,
-  MessageSquare,
-  Paperclip,
-  Send,
-  Trash2,
-  Flame,
-} from "lucide-react";
+import { useRef, useState, useEffect, useMemo } from "react";
+import { Menu, Plus, Upload, Search, FileText, Flame } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   useDocumentWorkflow,
@@ -23,7 +11,9 @@ import {
   useDocumentClauses,
   useDocumentStatus,
 } from "@/hooks/useDocuments";
-import { generateRiskHeatmap, getTopRiskyClauses } from "@/lib/api";
+import { getTopRiskyClauses } from "@/lib/api";
+import { RiskHeatmap } from "@/components/RiskHeatmap";
+import { ChatInterface, ChatMessage } from "@/components/ChatInterface";
 
 // ChatGPT-like dashboard for legal document assistant
 // - Left: sidebar with New Chat, Upload, Recent Docs + search
@@ -33,24 +23,17 @@ import { generateRiskHeatmap, getTopRiskyClauses } from "@/lib/api";
 export const Dashboard = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [messages, setMessages] = useState<
-    {
-      id: string;
-      role: "user" | "assistant";
-      content: string;
-      isLoading?: boolean;
-    }[]
-  >([
+  const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "m1",
       role: "assistant",
       content:
-        "Hi! Upload a legal document and ask me anything. I’ll summarize, flag risky clauses, and answer questions in simple language.",
+        "Hi! Upload a legal document and ask me anything. I'll summarize, flag risky clauses, and answer questions in simple language.",
+      timestamp: new Date(),
     },
   ]);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [chatInput, setChatInput] = useState("");
   const [recentDocs, setRecentDocs] = useState<
     { id: string; name: string; date: string; status?: string }[]
   >([]);
@@ -69,10 +52,12 @@ export const Dashboard = () => {
   );
 
   // Get clauses for the current document
-  const { data: clauses = [], isLoading: clausesLoading } = useDocumentClauses(
-    currentDocId,
-    !!currentDocId
-  );
+  const {
+    data: clauses = [],
+    isLoading: clausesLoading,
+    error: clausesError,
+    isSuccess: clausesSuccess,
+  } = useDocumentClauses(currentDocId, !!currentDocId);
 
   const filteredDocs = recentDocs.filter((d) =>
     d.name.toLowerCase().includes(docQuery.toLowerCase())
@@ -90,11 +75,12 @@ export const Dashboard = () => {
       const file = files[0];
 
       // Add upload status message
-      const uploadMsg = {
+      const uploadMsg: ChatMessage = {
         id: `upload-${Date.now()}`,
-        role: "assistant" as const,
+        role: "assistant",
         content: `Uploading ${file.name}... This may take a moment.`,
         isLoading: true,
+        timestamp: new Date(),
       };
       setMessages((prev) => [...prev, uploadMsg]);
 
@@ -142,6 +128,8 @@ export const Dashboard = () => {
             (error as Error)?.message ||
             "Unknown error"
           }`,
+          error: true,
+          timestamp: new Date(),
         },
       ]);
     }
@@ -164,39 +152,42 @@ export const Dashboard = () => {
         role: "assistant",
         content:
           "New chat started. Upload a document or pick from Recent Docs, then ask your questions.",
+        timestamp: new Date(),
       },
     ]);
     setSelectedDocs([]);
-    setChatInput("");
   }
 
-  async function sendMessage() {
-    const content = chatInput.trim();
-    if (!content) return;
-
+  async function sendMessage(content: string) {
     // Check if we have a document selected
     if (!currentDocId) {
-      const errorMsg = {
+      const errorMsg: ChatMessage = {
         id: `error-${Date.now()}`,
-        role: "assistant" as const,
+        role: "assistant",
         content:
           "Please upload and select a document first before asking questions.",
+        timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMsg]);
       return;
     }
 
-    const userMsg = { id: `u-${Date.now()}`, role: "user" as const, content };
-    const loadingMsg = {
+    const userMsg: ChatMessage = {
+      id: `u-${Date.now()}`,
+      role: "user",
+      content,
+      timestamp: new Date(),
+    };
+    const loadingMsg: ChatMessage = {
       id: `loading-${Date.now()}`,
-      role: "assistant" as const,
+      role: "assistant",
       content: "Analyzing your question and searching through the document...",
       isLoading: true,
+      timestamp: new Date(),
     };
 
     // Immediate optimistic render
     setMessages((prev) => [...prev, userMsg, loadingMsg]);
-    setChatInput("");
 
     try {
       // Ask the question using the API
@@ -207,20 +198,18 @@ export const Dashboard = () => {
       });
 
       // Format the response with sources
-      let answerContent = response.answer;
-      if (response.sources && response.sources.length > 0) {
-        answerContent += "\n\n**Sources:**\n";
-        response.sources.forEach((source, index) => {
-          answerContent += `${index + 1}. "${
-            source.snippet
-          }" (Relevance: ${Math.round(source.relevance_score * 100)}%)\n`;
-        });
-      }
+      const answerContent = response.answer;
+      const sources = response.sources?.map((source) => ({
+        snippet: source.snippet,
+        relevance_score: source.relevance_score,
+      }));
 
-      const assistantMsg = {
+      const assistantMsg: ChatMessage = {
         id: `a-${Date.now()}`,
-        role: "assistant" as const,
+        role: "assistant",
         content: answerContent,
+        sources,
+        timestamp: new Date(),
       };
 
       // Replace loading message with actual response
@@ -230,14 +219,16 @@ export const Dashboard = () => {
     } catch (error: unknown) {
       console.error("Question failed:", error);
 
-      const errorMsg = {
+      const errorMsg: ChatMessage = {
         id: `error-${Date.now()}`,
-        role: "assistant" as const,
+        role: "assistant",
         content: `Sorry, I couldn't process your question: ${
           (error as any)?.response?.data?.detail ||
           (error as Error)?.message ||
           "Unknown error"
         }`,
+        error: true,
+        timestamp: new Date(),
       };
 
       // Replace loading message with error
@@ -247,9 +238,33 @@ export const Dashboard = () => {
     }
   }
 
-  // Generate risk matrix from actual clause data
-  const riskMatrix = generateRiskHeatmap(clauses);
-  const topRiskyClauses = getTopRiskyClauses(clauses);
+  // Handle feedback on messages
+  function handleFeedback(
+    messageId: string,
+    feedback: "positive" | "negative"
+  ) {
+    setMessages((prev) =>
+      prev.map((msg) => (msg.id === messageId ? { ...msg, feedback } : msg))
+    );
+  }
+
+  // Handle retry for failed messages
+  function handleRetry(messageId: string) {
+    const message = messages.find((m) => m.id === messageId);
+    if (message && message.role === "assistant") {
+      // Find the user message that prompted this response
+      const messageIndex = messages.findIndex((m) => m.id === messageId);
+      const userMessage = messageIndex > 0 ? messages[messageIndex - 1] : null;
+
+      if (userMessage && userMessage.role === "user") {
+        // Retry the question
+        sendMessage(userMessage.content);
+      }
+    }
+  }
+
+  // Generate top risky clauses - memoized for performance
+  const topRiskyClauses = useMemo(() => getTopRiskyClauses(clauses), [clauses]);
 
   // Update current document when selection changes
   useEffect(() => {
@@ -305,6 +320,7 @@ export const Dashboard = () => {
               ...msg,
               content: `Document processing failed. Please try uploading again or contact support if the issue persists.`,
               isLoading: false,
+              error: true,
             };
           }
           return msg;
@@ -313,11 +329,33 @@ export const Dashboard = () => {
     }
   }, [documentStatus, currentDocId]);
 
+  // Debug effect to track clauses data changes
+  useEffect(() => {
+    if (currentDocId && clauses.length > 0) {
+      console.log(`Clauses loaded for document ${currentDocId}:`, {
+        count: clauses.length,
+        hasRiskLevels: clauses.every((c) => c.risk_level),
+        riskLevels: clauses.map((c) => c.risk_level),
+        categories: clauses.map((c) => c.category),
+      });
+    }
+  }, [currentDocId, clauses]);
+
+  // Convert selected docs to the format expected by ChatInterface
+  const selectedDocuments = selectedDocs
+    .map((id) => {
+      const doc = recentDocs.find((d) => d.id === id);
+      return doc
+        ? { id: doc.id, name: doc.name, status: doc.status }
+        : { id, name: "Loading...", status: undefined };
+    })
+    .filter(Boolean);
+
   return (
     <div className="flex h-screen w-full bg-[#0B0B0B] text-white antialiased">
       {/* Left Sidebar */}
       <aside
-        className={`$${
+        className={`${
           sidebarOpen ? "flex" : "hidden"
         } md:flex w-72 shrink-0 flex-col border-r border-white/10 bg-[#111111] p-4 gap-4`}
       >
@@ -424,104 +462,20 @@ export const Dashboard = () => {
           <div className="w-9" />
         </div>
 
-        {/* Messages */}
-        <div className="flex-1 w-full max-w-3xl overflow-y-auto px-4 md:px-6 py-6 space-y-4">
-          {messages.map((m) => (
-            <div key={m.id} className="flex w-full">
-              {m.role === "assistant" ? (
-                <div className="mr-auto max-w-[85%]">
-                  <Card className="bg-[#121212] border-white/10">
-                    <CardContent className="p-4 text-sm leading-6 text-white/90">
-                      <div className="mb-2 flex items-center gap-2 text-white/70">
-                        <MessageSquare className="h-4 w-4" /> Assistant
-                      </div>
-                      <div className="whitespace-pre-wrap">
-                        {m.content}
-                        {m.isLoading && (
-                          <div className="mt-2 flex items-center gap-2">
-                            <div className="h-2 w-2 bg-purple-400 rounded-full animate-pulse"></div>
-                            <div className="h-2 w-2 bg-purple-400 rounded-full animate-pulse delay-75"></div>
-                            <div className="h-2 w-2 bg-purple-400 rounded-full animate-pulse delay-150"></div>
-                          </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              ) : (
-                <div className="ml-auto max-w-[85%]">
-                  <Card className="bg-[#18181B] border-white/10">
-                    <CardContent className="p-4 text-sm leading-6">
-                      <div className="mb-2 flex items-center justify-end gap-2 text-white/60">
-                        You
-                      </div>
-                      <div className="whitespace-pre-wrap">{m.content}</div>
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Context chips + Composer */}
-        <div className="w-full max-w-3xl px-4 md:px-6 pb-4">
-          {/* Context bar */}
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            {selectedDocs.length > 0 ? (
-              <>
-                {selectedDocs.map((id) => {
-                  const d = recentDocs.find((x) => x.id === id);
-                  if (!d) return null;
-                  return (
-                    <span
-                      key={id}
-                      className="inline-flex items-center gap-2 rounded-full border border-purple-500/30 bg-purple-500/10 px-3 py-1 text-xs"
-                    >
-                      <FileText className="h-3 w-3" /> {d.name}
-                      <button
-                        className="ml-1 text-white/60 hover:text-white"
-                        onClick={() => toggleSelectDoc(id)}
-                        aria-label={`Remove ${d.name}`}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  );
-                })}
-                <Button variant="ghost" size="sm" onClick={clearContext}>
-                  <Trash2 className="mr-1 h-3 w-3" /> Clear context
-                </Button>
-              </>
-            ) : (
-              <div className="text-xs text-white/50">
-                No documents selected. Upload or choose from sidebar.
-              </div>
-            )}
-          </div>
-
-          {/* Composer */}
-          <div className="rounded-2xl border border-white/10 bg-[#0F0F0F] p-2">
-            <div className="flex items-end gap-2">
-              <Button variant="ghost" size="icon" onClick={handleUploadClick}>
-                <Paperclip className="h-5 w-5" />
-              </Button>
-              <textarea
-                rows={1}
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Ask about clauses, risks, or a plain-English summary…"
-                className="flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none placeholder:text-white/40"
-              />
-              <Button
-                onClick={sendMessage}
-                disabled={!chatInput.trim() || askQuestionMutation.isPending}
-              >
-                <Send className="mr-2 h-4 w-4" />
-                {askQuestionMutation.isPending ? "Asking..." : "Send"}
-              </Button>
-            </div>
-          </div>
+        {/* Chat Interface */}
+        <div className="flex-1 w-full max-w-3xl">
+          <ChatInterface
+            messages={messages}
+            onSendMessage={sendMessage}
+            onRetryMessage={handleRetry}
+            onFeedback={handleFeedback}
+            selectedDocuments={selectedDocuments}
+            onRemoveDocument={(docId) => toggleSelectDoc(docId)}
+            onClearContext={clearContext}
+            onUploadClick={handleUploadClick}
+            isProcessing={askQuestionMutation.isPending}
+            disabled={askQuestionMutation.isPending}
+          />
         </div>
       </section>
 
@@ -531,52 +485,62 @@ export const Dashboard = () => {
           <Flame className="h-4 w-4 text-red-500" /> Risk Heatmap
         </h3>
 
-        {/* Heatmap grid (placeholder) */}
-        <div className="grid grid-cols-6 gap-1 rounded-xl border border-white/10 bg-[#0F0F0F] p-2">
-          {riskMatrix.flat().map((v, i) => {
-            let bg = "bg-emerald-700";
-            if (v > 0.7) bg = "bg-red-600";
-            else if (v > 0.5) bg = "bg-orange-600";
-            else if (v > 0.35) bg = "bg-yellow-600";
-            else if (v > 0.2) bg = "bg-lime-700";
-            return (
-              <div
-                key={i}
-                className={`aspect-square rounded-sm ${bg} opacity-80`}
-                title={`Risk ${(v * 100).toFixed(0)}%`}
-              />
-            );
-          })}
-        </div>
+        {/* Document info */}
+        {currentDocId && (
+          <div className="mb-4 p-2 rounded-lg bg-[#0F0F0F] border border-white/10">
+            <div className="text-xs text-white/60">Document</div>
+            <div className="text-sm text-white/90">
+              {recentDocs.find((d) => d.id === currentDocId)?.name ||
+                "Loading..."}
+            </div>
+            <div className="text-xs text-white/50">
+              {clauses.length} clauses analyzed
+            </div>
+          </div>
+        )}
 
-        {/* Legend */}
-        <div className="mt-3 flex items-center justify-between text-[11px] text-white/60">
-          <span>Low</span>
-          <span>Medium</span>
-          <span>High</span>
-        </div>
+        {/* Risk Heatmap */}
+        <RiskHeatmap
+          clauses={clauses || []}
+          isLoading={clausesLoading}
+          error={clausesError}
+        />
 
-        {/* Top risky clauses (placeholder) */}
+        {/* Top risky clauses */}
         <div className="mt-6 space-y-2">
           <div className="text-xs uppercase tracking-wide text-white/60">
-            Top clauses
+            Top risky clauses ({topRiskyClauses.length})
           </div>
-          {topRiskyClauses.length > 0 ? (
-            topRiskyClauses.map((c) => (
+          {clausesLoading ? (
+            <div className="space-y-2">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="animate-pulse">
+                  <div className="h-8 bg-gray-700 rounded-lg"></div>
+                </div>
+              ))}
+            </div>
+          ) : clausesError ? (
+            <div className="text-xs text-red-400 p-3">
+              Failed to load clause analysis. Please refresh or try again.
+            </div>
+          ) : topRiskyClauses.length > 0 ? (
+            topRiskyClauses.map((c, index) => (
               <div
-                key={c.k}
-                className="flex items-center justify-between rounded-lg border border-white/10 bg-[#0F0F0F] px-3 py-2"
+                key={c.clauseId || `${c.k}-${index}`}
+                className="flex items-center justify-between rounded-lg border border-white/10 bg-[#0F0F0F] px-3 py-2 hover:border-white/20 transition-colors"
               >
-                <div className="text-sm">{c.k}</div>
-                <div className="text-xs text-white/60">
+                <div className="text-sm truncate">{c.k}</div>
+                <div className="text-xs text-white/60 ml-2">
                   {Math.round(c.risk * 100)}%
                 </div>
               </div>
             ))
           ) : (
             <div className="text-xs text-white/50 p-3">
-              {clausesLoading
-                ? "Loading risk analysis..."
+              {currentDocId && clausesSuccess && clauses.length === 0
+                ? "No clauses found in document"
+                : currentDocId
+                ? "No high-risk clauses found"
                 : "Upload a document to see risk analysis"}
             </div>
           )}
