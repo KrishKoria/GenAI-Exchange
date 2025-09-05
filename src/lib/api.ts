@@ -2,17 +2,17 @@
  * API service layer for GenAI Exchange legal document analysis
  * Handles all communication with the FastAPI backend
  */
-import axios, { AxiosResponse } from 'axios';
+import axios, { AxiosResponse } from "axios";
 
 // Get API base URL from environment with fallback to localhost
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 // Create axios instance with default configuration
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000, // 30 second timeout
   headers: {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   },
 });
 
@@ -22,13 +22,13 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response) {
       // Server responded with error status
-      console.error('API Error:', error.response.status, error.response.data);
+      console.error("API Error:", error.response.status, error.response.data);
     } else if (error.request) {
       // Request made but no response received
-      console.error('Network Error:', error.message);
+      console.error("Network Error:", error.message);
     } else {
       // Something else happened
-      console.error('Request Error:', error.message);
+      console.error("Request Error:", error.message);
     }
     return Promise.reject(error);
   }
@@ -38,8 +38,8 @@ apiClient.interceptors.response.use(
 // TYPE DEFINITIONS (matching backend models)
 // ========================================
 
-export type DocumentStatus = 'uploaded' | 'processing' | 'completed' | 'failed';
-export type RiskLevel = 'low' | 'moderate' | 'attention';
+export type DocumentStatus = "uploaded" | "processing" | "completed" | "failed";
+export type RiskLevel = "low" | "moderate" | "attention";
 
 export interface DocumentUploadResponse {
   doc_id: string;
@@ -96,6 +96,12 @@ export interface DocumentStatusResponse {
   created_at?: string;
   processed_at?: string;
   error_message?: string;
+  clause_count?: number;
+  page_count?: number;
+  masked?: boolean;
+  pii_summary?: Record<string, unknown>;
+  processing_statistics?: Record<string, unknown>;
+  message?: string;
 }
 
 // Q&A Types
@@ -134,23 +140,23 @@ export const documentApi = {
   /**
    * Upload a document for processing
    */
-  async uploadDocument(file: File, sessionId?: string): Promise<DocumentUploadResponse> {
+  async uploadDocument(
+    file: File,
+    sessionId?: string
+  ): Promise<DocumentUploadResponse> {
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append("file", file);
     if (sessionId) {
-      formData.append('session_id', sessionId);
+      formData.append("session_id", sessionId);
     }
 
-    const response: AxiosResponse<DocumentUploadResponse> = await apiClient.post(
-      '/api/v1/documents/ingest',
-      formData,
-      {
+    const response: AxiosResponse<DocumentUploadResponse> =
+      await apiClient.post("/api/v1/documents/ingest", formData, {
         headers: {
-          'Content-Type': 'multipart/form-data',
+          "Content-Type": "multipart/form-data",
         },
         timeout: 60000, // 60 seconds for file upload
-      }
-    );
+      });
 
     return response.data;
   },
@@ -180,7 +186,10 @@ export const documentApi = {
   /**
    * Get detailed information about a specific clause
    */
-  async getClauseDetail(docId: string, clauseId: string): Promise<ClauseDetail> {
+  async getClauseDetail(
+    docId: string,
+    clauseId: string
+  ): Promise<ClauseDetail> {
     const response: AxiosResponse<ClauseDetail> = await apiClient.get(
       `/api/v1/documents/clause/${clauseId}?doc_id=${docId}`
     );
@@ -199,7 +208,7 @@ export const qaApi = {
    */
   async askQuestion(request: QuestionRequest): Promise<AnswerResponse> {
     const response: AxiosResponse<AnswerResponse> = await apiClient.post(
-      '/api/v1/qa/ask',
+      "/api/v1/qa/ask",
       request
     );
 
@@ -209,7 +218,10 @@ export const qaApi = {
   /**
    * Get Q&A history for a document
    */
-  async getQAHistory(docId: string, limit: number = 10): Promise<QAHistoryItem[]> {
+  async getQAHistory(
+    docId: string,
+    limit: number = 10
+  ): Promise<QAHistoryItem[]> {
     const response: AxiosResponse<QAHistoryItem[]> = await apiClient.get(
       `/api/v1/qa/history/${docId}?limit=${limit}`
     );
@@ -239,11 +251,11 @@ export function generateRiskHeatmap(clauses: ClauseSummary[]): number[][] {
   // Convert risk levels to numeric values
   const riskValues = clauses.map((clause) => {
     switch (clause.risk_level) {
-      case 'low':
+      case "low":
         return 0.2;
-      case 'moderate':
+      case "moderate":
         return 0.5;
-      case 'attention':
+      case "attention":
         return 0.8;
       default:
         return 0.4;
@@ -260,7 +272,8 @@ export function generateRiskHeatmap(clauses: ClauseSummary[]): number[][] {
         rowData.push(riskValues[index]);
       } else {
         // Fill remaining cells with average risk of existing clauses
-        const avgRisk = riskValues.reduce((sum, val) => sum + val, 0) / riskValues.length;
+        const avgRisk =
+          riskValues.reduce((sum, val) => sum + val, 0) / riskValues.length;
         rowData.push(avgRisk);
       }
     }
@@ -273,9 +286,12 @@ export function generateRiskHeatmap(clauses: ClauseSummary[]): number[][] {
 /**
  * Get top risky clauses from clauses array
  */
-export function getTopRiskyClauses(clauses: ClauseSummary[], limit: number = 3) {
+export function getTopRiskyClauses(
+  clauses: ClauseSummary[],
+  limit: number = 3
+) {
   return clauses
-    .filter((clause) => clause.risk_level !== 'low')
+    .filter((clause) => clause.risk_level !== "low")
     .sort((a, b) => {
       const riskOrder = { attention: 3, moderate: 2, low: 1 };
       return riskOrder[b.risk_level] - riskOrder[a.risk_level];
@@ -283,7 +299,7 @@ export function getTopRiskyClauses(clauses: ClauseSummary[], limit: number = 3) 
     .slice(0, limit)
     .map((clause) => ({
       k: clause.category,
-      risk: clause.risk_level === 'attention' ? 0.85 : 0.65,
+      risk: clause.risk_level === "attention" ? 0.85 : 0.65,
     }));
 }
 
@@ -299,14 +315,14 @@ export function formatProcessingMessage(progress: ProcessingProgress): string {
  * Check if document processing is complete
  */
 export function isDocumentReady(status: DocumentStatusResponse): boolean {
-  return status.status === 'completed';
+  return status.status === "completed";
 }
 
 /**
  * Check if document processing failed
  */
 export function isDocumentFailed(status: DocumentStatusResponse): boolean {
-  return status.status === 'failed';
+  return status.status === "failed";
 }
 
 /**
@@ -314,20 +330,20 @@ export function isDocumentFailed(status: DocumentStatusResponse): boolean {
  */
 export function getStatusColor(status: DocumentStatus): string {
   switch (status) {
-    case 'uploaded':
-      return 'blue';
-    case 'processing':
-      return 'yellow';
-    case 'completed':
-      return 'green';
-    case 'failed':
-      return 'red';
+    case "uploaded":
+      return "blue";
+    case "processing":
+      return "yellow";
+    case "completed":
+      return "green";
+    case "failed":
+      return "red";
     default:
-      return 'gray';
+      return "gray";
   }
 }
 
-export default {
+const apiExports = {
   documentApi,
   qaApi,
   generateRiskHeatmap,
@@ -337,3 +353,5 @@ export default {
   isDocumentFailed,
   getStatusColor,
 };
+
+export default apiExports;

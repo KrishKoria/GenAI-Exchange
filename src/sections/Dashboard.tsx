@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useRef, useState, useEffect } from "react";
@@ -16,9 +17,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { useDocumentWorkflow, useAskQuestion, useDocumentClauses } from "@/hooks/useDocuments";
-import { generateRiskHeatmap, getTopRiskyClauses, formatProcessingMessage, isDocumentReady } from "@/lib/api";
-import type { ClauseSummary, AnswerResponse } from "@/lib/api";
+import {
+  useDocumentWorkflow,
+  useAskQuestion,
+  useDocumentClauses,
+  useDocumentStatus,
+} from "@/hooks/useDocuments";
+import { generateRiskHeatmap, getTopRiskyClauses } from "@/lib/api";
 
 // ChatGPT-like dashboard for legal document assistant
 // - Left: sidebar with New Chat, Upload, Recent Docs + search
@@ -29,7 +34,12 @@ export const Dashboard = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [messages, setMessages] = useState<
-    { id: string; role: "user" | "assistant"; content: string; isLoading?: boolean }[]
+    {
+      id: string;
+      role: "user" | "assistant";
+      content: string;
+      isLoading?: boolean;
+    }[]
   >([
     {
       id: "m1",
@@ -47,12 +57,17 @@ export const Dashboard = () => {
   const [docQuery, setDocQuery] = useState("");
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
   const [currentDocId, setCurrentDocId] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
 
   // API hooks
   const { upload: uploadDocument } = useDocumentWorkflow();
   const askQuestionMutation = useAskQuestion();
-  
+
+  // Get document status for current document
+  const { data: documentStatus } = useDocumentStatus(
+    currentDocId,
+    !!currentDocId
+  );
+
   // Get clauses for the current document
   const { data: clauses = [], isLoading: clausesLoading } = useDocumentClauses(
     currentDocId,
@@ -69,13 +84,11 @@ export const Dashboard = () => {
 
   async function handleFilesSelected(files: FileList | null) {
     if (!files || files.length === 0) return;
-    
-    setIsUploading(true);
-    
+
     try {
       // For now, handle single file upload (can be extended for multiple files)
       const file = files[0];
-      
+
       // Add upload status message
       const uploadMsg = {
         id: `upload-${Date.now()}`,
@@ -84,13 +97,13 @@ export const Dashboard = () => {
         isLoading: true,
       };
       setMessages((prev) => [...prev, uploadMsg]);
-      
+
       // Upload the document
-      const response = await uploadDocument.mutateAsync({ 
-        file, 
-        sessionId: `session-${Date.now()}` 
+      const response = await uploadDocument.mutateAsync({
+        file,
+        sessionId: `session-${Date.now()}`,
       });
-      
+
       // Add the document to recent docs
       const newDoc = {
         id: response.doc_id,
@@ -98,15 +111,15 @@ export const Dashboard = () => {
         date: new Date().toISOString().slice(0, 10),
         status: response.status,
       };
-      
+
       setRecentDocs((prev) => [newDoc, ...prev]);
       setSelectedDocs([response.doc_id]);
       setCurrentDocId(response.doc_id);
-      
+
       // Update message to show processing started
-      setMessages((prev) => 
-        prev.map((msg) => 
-          msg.id === uploadMsg.id 
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === uploadMsg.id
             ? {
                 ...msg,
                 content: `${response.filename} uploaded successfully! Processing document...`,
@@ -115,21 +128,22 @@ export const Dashboard = () => {
             : msg
         )
       );
-      
     } catch (error: unknown) {
-      console.error('Upload failed:', error);
-      
+      console.error("Upload failed:", error);
+
       // Show error message
       setMessages((prev) => [
-        ...prev.filter(msg => !msg.isLoading),
+        ...prev.filter((msg) => !msg.isLoading),
         {
           id: `error-${Date.now()}`,
           role: "assistant",
-          content: `Sorry, there was an error uploading your document: ${(error as any)?.response?.data?.detail || (error as Error)?.message || 'Unknown error'}`,
+          content: `Sorry, there was an error uploading your document: ${
+            (error as any)?.response?.data?.detail ||
+            (error as Error)?.message ||
+            "Unknown error"
+          }`,
         },
       ]);
-    } finally {
-      setIsUploading(false);
     }
   }
 
@@ -159,18 +173,19 @@ export const Dashboard = () => {
   async function sendMessage() {
     const content = chatInput.trim();
     if (!content) return;
-    
+
     // Check if we have a document selected
     if (!currentDocId) {
       const errorMsg = {
         id: `error-${Date.now()}`,
         role: "assistant" as const,
-        content: "Please upload and select a document first before asking questions.",
+        content:
+          "Please upload and select a document first before asking questions.",
       };
       setMessages((prev) => [...prev, errorMsg]);
       return;
     }
-    
+
     const userMsg = { id: `u-${Date.now()}`, role: "user" as const, content };
     const loadingMsg = {
       id: `loading-${Date.now()}`,
@@ -178,7 +193,7 @@ export const Dashboard = () => {
       content: "Analyzing your question and searching through the document...",
       isLoading: true,
     };
-    
+
     // Immediate optimistic render
     setMessages((prev) => [...prev, userMsg, loadingMsg]);
     setChatInput("");
@@ -190,43 +205,44 @@ export const Dashboard = () => {
         question: content,
         session_id: `session-${Date.now()}`,
       });
-      
+
       // Format the response with sources
       let answerContent = response.answer;
       if (response.sources && response.sources.length > 0) {
         answerContent += "\n\n**Sources:**\n";
         response.sources.forEach((source, index) => {
-          answerContent += `${index + 1}. "${source.snippet}" (Relevance: ${Math.round(source.relevance_score * 100)}%)\n`;
+          answerContent += `${index + 1}. "${
+            source.snippet
+          }" (Relevance: ${Math.round(source.relevance_score * 100)}%)\n`;
         });
       }
-      
+
       const assistantMsg = {
         id: `a-${Date.now()}`,
         role: "assistant" as const,
         content: answerContent,
       };
-      
+
       // Replace loading message with actual response
-      setMessages((prev) => 
-        prev.map((msg) => 
-          msg.id === loadingMsg.id ? assistantMsg : msg
-        )
+      setMessages((prev) =>
+        prev.map((msg) => (msg.id === loadingMsg.id ? assistantMsg : msg))
       );
-      
     } catch (error: unknown) {
-      console.error('Question failed:', error);
-      
+      console.error("Question failed:", error);
+
       const errorMsg = {
         id: `error-${Date.now()}`,
         role: "assistant" as const,
-        content: `Sorry, I couldn't process your question: ${(error as any)?.response?.data?.detail || (error as Error)?.message || 'Unknown error'}`,
+        content: `Sorry, I couldn't process your question: ${
+          (error as any)?.response?.data?.detail ||
+          (error as Error)?.message ||
+          "Unknown error"
+        }`,
       };
-      
+
       // Replace loading message with error
-      setMessages((prev) => 
-        prev.map((msg) => 
-          msg.id === loadingMsg.id ? errorMsg : msg
-        )
+      setMessages((prev) =>
+        prev.map((msg) => (msg.id === loadingMsg.id ? errorMsg : msg))
       );
     }
   }
@@ -234,7 +250,7 @@ export const Dashboard = () => {
   // Generate risk matrix from actual clause data
   const riskMatrix = generateRiskHeatmap(clauses);
   const topRiskyClauses = getTopRiskyClauses(clauses);
-  
+
   // Update current document when selection changes
   useEffect(() => {
     if (selectedDocs.length > 0) {
@@ -243,6 +259,59 @@ export const Dashboard = () => {
       setCurrentDocId(null);
     }
   }, [selectedDocs]);
+
+  // Monitor document status and update UI when processing completes
+  useEffect(() => {
+    if (!documentStatus || !currentDocId) return;
+
+    // Update document status in recentDocs
+    setRecentDocs((prev) =>
+      prev.map((doc) =>
+        doc.id === currentDocId
+          ? { ...doc, status: documentStatus.status }
+          : doc
+      )
+    );
+
+    // Update processing message when status changes
+    if (
+      documentStatus.status === "completed" &&
+      documentStatus.clause_count! > 0
+    ) {
+      setMessages((prev) =>
+        prev.map((msg) => {
+          // Find the processing message for this document
+          if (
+            msg.content.includes("Processing document...") &&
+            msg.role === "assistant"
+          ) {
+            return {
+              ...msg,
+              content: `Document processed successfully! Found ${documentStatus.clause_count} clauses. You can now ask questions about the document.`,
+              isLoading: false,
+            };
+          }
+          return msg;
+        })
+      );
+    } else if (documentStatus.status === "failed") {
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (
+            msg.content.includes("Processing document...") &&
+            msg.role === "assistant"
+          ) {
+            return {
+              ...msg,
+              content: `Document processing failed. Please try uploading again or contact support if the issue persists.`,
+              isLoading: false,
+            };
+          }
+          return msg;
+        })
+      );
+    }
+  }, [documentStatus, currentDocId]);
 
   return (
     <div className="flex h-screen w-full bg-[#0B0B0B] text-white antialiased">
@@ -284,7 +353,9 @@ export const Dashboard = () => {
         </div>
 
         <div className="mt-2">
-          <label className="text-xs uppercase tracking-wide text-white/60">Recent documents</label>
+          <label className="text-xs uppercase tracking-wide text-white/60">
+            Recent documents
+          </label>
           <div className="mt-2 flex items-center gap-2">
             <Input
               placeholder="Search documents"
@@ -292,7 +363,11 @@ export const Dashboard = () => {
               onChange={(e) => setDocQuery(e.target.value)}
               className="bg-[#0F0F0F] border-white/10"
             />
-            <Button variant="ghost" size="icon" className="border border-white/10">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="border border-white/10"
+            >
               <Search className="h-4 w-4" />
             </Button>
           </div>
@@ -336,7 +411,11 @@ export const Dashboard = () => {
       <section className="flex min-w-0 flex-1 flex-col items-center">
         {/* Mobile top bar */}
         <div className="flex w-full items-center justify-between border-b border-white/10 bg-[#111111] px-4 py-3 md:hidden">
-          <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setSidebarOpen(true)}
+          >
             <Menu className="h-5 w-5" />
           </Button>
           <div className="text-base font-semibold bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
@@ -415,7 +494,9 @@ export const Dashboard = () => {
                 </Button>
               </>
             ) : (
-              <div className="text-xs text-white/50">No documents selected. Upload or choose from sidebar.</div>
+              <div className="text-xs text-white/50">
+                No documents selected. Upload or choose from sidebar.
+              </div>
             )}
           </div>
 
@@ -432,11 +513,11 @@ export const Dashboard = () => {
                 placeholder="Ask about clauses, risks, or a plain-English summary…"
                 className="flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none placeholder:text-white/40"
               />
-              <Button 
+              <Button
                 onClick={sendMessage}
                 disabled={!chatInput.trim() || askQuestionMutation.isPending}
               >
-                <Send className="mr-2 h-4 w-4" /> 
+                <Send className="mr-2 h-4 w-4" />
                 {askQuestionMutation.isPending ? "Asking..." : "Send"}
               </Button>
             </div>
@@ -477,22 +558,30 @@ export const Dashboard = () => {
 
         {/* Top risky clauses (placeholder) */}
         <div className="mt-6 space-y-2">
-          <div className="text-xs uppercase tracking-wide text-white/60">Top clauses</div>
-          {topRiskyClauses.length > 0 ? topRiskyClauses.map((c) => (
-            <div
-              key={c.k}
-              className="flex items-center justify-between rounded-lg border border-white/10 bg-[#0F0F0F] px-3 py-2"
-            >
-              <div className="text-sm">{c.k}</div>
-              <div className="text-xs text-white/60">{Math.round(c.risk * 100)}%</div>
-            </div>
-          )) : (
+          <div className="text-xs uppercase tracking-wide text-white/60">
+            Top clauses
+          </div>
+          {topRiskyClauses.length > 0 ? (
+            topRiskyClauses.map((c) => (
+              <div
+                key={c.k}
+                className="flex items-center justify-between rounded-lg border border-white/10 bg-[#0F0F0F] px-3 py-2"
+              >
+                <div className="text-sm">{c.k}</div>
+                <div className="text-xs text-white/60">
+                  {Math.round(c.risk * 100)}%
+                </div>
+              </div>
+            ))
+          ) : (
             <div className="text-xs text-white/50 p-3">
-              {clausesLoading ? "Loading risk analysis..." : "Upload a document to see risk analysis"}
+              {clausesLoading
+                ? "Loading risk analysis..."
+                : "Upload a document to see risk analysis"}
             </div>
           )}
         </div>
       </aside>
     </div>
   );
-}
+};

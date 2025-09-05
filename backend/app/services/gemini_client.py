@@ -8,14 +8,8 @@ from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
 
 from google import genai
+from google.genai import types
 from google.api_core.exceptions import GoogleAPIError
-from google.genai.types import (
-    HarmCategory,
-    HarmBlockThreshold,
-    SafetySetting,
-)
-from vertexai.generative_models import GenerativeModel
-import vertexai
 from app.core.config import get_settings
 from app.core.logging import get_logger, LogContext, log_execution_time
 from app.services.clause_segmenter import ClauseCandidate
@@ -49,56 +43,32 @@ class TokenEstimator:
         return total_tokens <= (max_tokens * buffer_ratio)
 
 class GeminiClient:
-    """Service for interacting with Gemini models via Vertex AI."""
+    """Service for interacting with Gemini models via Google GenAI."""
     
     def __init__(self):
         self.settings = get_settings()
-        self._model: Optional[GenerativeModel] = None
+        self._client: Optional[genai.Client] = None
         self._initialized = False
     
     async def initialize(self):
-        """Initialize Vertex AI and Gemini model."""
+        """Initialize Google GenAI client."""
         if self._initialized:
             return
         
         try:
-            # Initialize Vertex AI
-            vertexai.init(
+            # Initialize Google GenAI client for Vertex AI
+            self._client = genai.Client(
+                vertexai=True,
                 project=self.settings.PROJECT_ID,
                 location=self.settings.VERTEX_AI_LOCATION
             )
-
-            # Modern safety settings definition
-            safety_settings = [
-    SafetySetting(
-        category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-        threshold=HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-    ),
-    SafetySetting(
-        category=HarmCategory.HARM_CATEGORY_HARASSMENT,
-        threshold=HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-    ),
-    SafetySetting(
-        category=HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-        threshold=HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-    ),
-    SafetySetting(
-        category=HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-        threshold=HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-    ),
-]
-            
-            self._model = GenerativeModel(
-                model_name=self.settings.GEMINI_MODEL_NAME,
-                safety_settings=safety_settings
-            )
             
             self._initialized = True
-            logger.info(f"Gemini model initialized: {self.settings.GEMINI_MODEL_NAME}")
+            logger.info(f"Google GenAI client initialized for model: {self.settings.GEMINI_MODEL_NAME}")
             
         except Exception as e:
-            logger.error(f"Failed to initialize Gemini client: {e}")
-            raise GeminiError(f"Gemini initialization failed: {e}")
+            logger.error(f"Failed to initialize Google GenAI client: {e}")
+            raise GeminiError(f"GenAI client initialization failed: {e}")
 
     async def batch_summarize_clauses(
         self, 
@@ -162,20 +132,42 @@ class GeminiClient:
             raise GeminiError(f"Failed to process batch: {e}")
     
     async def _generate_content(self, system_prompt: str, user_prompt: str) -> str:
-        """Generate content using Gemini model."""
-        if not self._model:
-            raise GeminiError("Model not initialized")
+        """Generate content using Google GenAI client."""
+        if not self._client:
+            raise GeminiError("Client not initialized")
         
         try:
+            # Define safety settings
+            safety_settings = [
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                    threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                    threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                    threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                    threshold=types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                ),
+            ]
+            
             full_prompt = f"{system_prompt}\n\n{user_prompt}"
-            response = self._model.generate_content(
-                full_prompt,
-                generation_config={
-                    "max_output_tokens": self.settings.MAX_OUTPUT_TOKENS,
-                    "temperature": 0.1,
-                    "top_p": 0.8,
-                    "top_k": 40
-                }
+            response = self._client.models.generate_content(
+                model=self.settings.GEMINI_MODEL_NAME,
+                contents=full_prompt,
+                config=types.GenerateContentConfig(
+                    max_output_tokens=self.settings.MAX_OUTPUT_TOKENS,
+                    temperature=0.1,
+                    top_p=0.8,
+                    top_k=40,
+                    safety_settings=safety_settings
+                )
             )
             if not response.text:
                 raise GeminiError("Empty response from Gemini")
