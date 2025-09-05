@@ -3,6 +3,7 @@ Document processing service with Document AI integration and fallback
 """
 import logging
 import tempfile
+import os
 from typing import Dict, Any, Optional, Tuple, List
 from pathlib import Path
 import asyncio
@@ -37,11 +38,14 @@ class DocumentProcessor:
         """Lazy initialization of Document AI client."""
         if self._doc_ai_client is None:
             self._doc_ai_client = documentai.DocumentProcessorServiceClient()
+            # Use project number if available, otherwise use project ID
+            project_identifier = self.settings.PROJECT_NUMBER or self.settings.PROJECT_ID
             self._processor_name = self._doc_ai_client.processor_path(
-                self.settings.PROJECT_ID,
+                project_identifier,
                 self.settings.DOC_AI_LOCATION,
                 self.settings.DOC_AI_PROCESSOR_ID
             )
+            logger.info(f"Document AI processor path: {self._processor_name}")
         return self._doc_ai_client
     
     async def process_document(
@@ -220,11 +224,14 @@ class DocumentProcessor:
         """
         # Try PyPDF2 first (faster but less reliable)
         try:
-            with tempfile.NamedTemporaryFile() as temp_file:
+            # Use delete=False to avoid Windows permission issues
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
                 temp_file.write(file_content)
                 temp_file.flush()
+                temp_file_path = temp_file.name
                 
-                with open(temp_file.name, 'rb') as pdf_file:
+            try:
+                with open(temp_file_path, 'rb') as pdf_file:
                     pdf_reader = PyPDF2.PdfReader(pdf_file)
                     
                     if len(pdf_reader.pages) > self.settings.MAX_PAGES:
@@ -258,6 +265,12 @@ class DocumentProcessor:
                         "page_count": len(pages),
                         "method": "pypdf2_fallback"
                     }
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_file_path)
+                except OSError:
+                    logger.warning(f"Failed to delete temporary file: {temp_file_path}")
                     
         except Exception as e:
             logger.warning(f"PyPDF2 failed: {e}. Trying pdfminer")
@@ -275,12 +288,15 @@ class DocumentProcessor:
             pdfminer text extraction results
         """
         try:
-            with tempfile.NamedTemporaryFile() as temp_file:
+            # Use delete=False to avoid Windows permission issues
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
                 temp_file.write(file_content)
                 temp_file.flush()
+                temp_file_path = temp_file.name
                 
+            try:
                 # Extract text using pdfminer
-                text = extract_text(temp_file.name)
+                text = extract_text(temp_file_path)
                 
                 # Basic page estimation (pdfminer doesn't easily give page count)
                 estimated_pages = max(1, len(text) // 3000)  # Rough estimate
@@ -296,6 +312,12 @@ class DocumentProcessor:
                     "page_count": estimated_pages,
                     "method": "pdfminer_fallback"
                 }
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_file_path)
+                except OSError:
+                    logger.warning(f"Failed to delete temporary file: {temp_file_path}")
                 
         except PDFSyntaxError as e:
             raise DocumentProcessingError(f"PDF syntax error: {e}")

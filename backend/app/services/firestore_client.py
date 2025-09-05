@@ -144,6 +144,12 @@ class FirestoreClient:
             try:
                 doc_ref = self.db.collection("documents").document(doc_id)
                 
+                # First check if document exists
+                doc = doc_ref.get()
+                if not doc.exists:
+                    logger.error(f"Document {doc_id} does not exist for status update")
+                    raise FirestoreError(f"Document {doc_id} not found for status update")
+                
                 update_data = {
                     "status": status.value,
                     "updated_at": firestore.SERVER_TIMESTAMP
@@ -160,6 +166,9 @@ class FirestoreClient:
                 logger.info(f"Document status updated: {doc_id} -> {status.value}")
                 return True
                 
+            except NotFound as e:
+                logger.error(f"Document {doc_id} not found for status update: {e}")
+                raise FirestoreError(f"Document {doc_id} not found for status update")
             except GoogleAPIError as e:
                 logger.error(f"Failed to update document status: {e}")
                 raise FirestoreError(f"Failed to update document status: {e}")
@@ -181,6 +190,13 @@ class FirestoreClient:
         """
         try:
             doc_ref = self.db.collection("documents").document(doc_id)
+            
+            # First check if document exists
+            doc = doc_ref.get()
+            if not doc.exists:
+                logger.error(f"Document {doc_id} does not exist for readability update")
+                raise FirestoreError(f"Document {doc_id} not found for readability update")
+            
             doc_ref.update({
                 "baseline_readability": baseline_readability,
                 "updated_at": firestore.SERVER_TIMESTAMP
@@ -189,6 +205,9 @@ class FirestoreClient:
             logger.info(f"Document readability updated: {doc_id}")
             return True
             
+        except NotFound as e:
+            logger.error(f"Document {doc_id} not found for readability update: {e}")
+            raise FirestoreError(f"Document {doc_id} not found for readability update")
         except GoogleAPIError as e:
             logger.error(f"Failed to update document readability: {e}")
             raise FirestoreError(f"Failed to update readability: {e}")

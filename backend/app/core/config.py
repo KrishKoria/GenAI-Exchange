@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     
     # GCP settings
     PROJECT_ID: str = Field(description="Google Cloud Project ID")
+    PROJECT_NUMBER: Optional[str] = Field(default=None, description="Google Cloud Project Number (for Document AI)")
     LOCATION: str = Field(default="us-central1", description="GCP region/location")
     
     # Document AI settings

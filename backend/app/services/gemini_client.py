@@ -7,22 +7,24 @@ import asyncio
 from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
 
-import vertexai
-from vertexai.generative_models import GenerativeModel, Part
+from google import genai
 from google.api_core.exceptions import GoogleAPIError
-from google.cloud.aiplatform_v1.types.content import SafetySetting
-
+from google.genai.types import (
+    HarmCategory,
+    HarmBlockThreshold,
+    SafetySetting,
+)
+from vertexai.generative_models import GenerativeModel
+import vertexai
 from app.core.config import get_settings
 from app.core.logging import get_logger, LogContext, log_execution_time
 from app.services.clause_segmenter import ClauseCandidate
 
 logger = get_logger(__name__)
 
-
 class GeminiError(Exception):
     """Custom exception for Gemini API errors."""
     pass
-
 
 class TokenEstimator:
     """Utility class for estimating token counts."""
@@ -31,12 +33,6 @@ class TokenEstimator:
     def estimate_tokens(text: str) -> int:
         """
         Rough token estimation (1 token ≈ 4 characters for English).
-        
-        Args:
-            text: Input text
-            
-        Returns:
-            Estimated token count
         """
         return max(1, len(text) // 4)
     
@@ -48,18 +44,9 @@ class TokenEstimator:
     ) -> bool:
         """
         Check if texts can fit in the context window.
-        
-        Args:
-            texts: List of text strings
-            max_tokens: Maximum allowed tokens
-            buffer_ratio: Safety buffer (0.8 = use 80% of limit)
-            
-        Returns:
-            True if texts fit within limits
         """
         total_tokens = sum(TokenEstimator.estimate_tokens(text) for text in texts)
         return total_tokens <= (max_tokens * buffer_ratio)
-
 
 class GeminiClient:
     """Service for interacting with Gemini models via Vertex AI."""
@@ -80,26 +67,26 @@ class GeminiClient:
                 project=self.settings.PROJECT_ID,
                 location=self.settings.VERTEX_AI_LOCATION
             )
-            
-            # Initialize Gemini model with safety settings
+
+            # Modern safety settings definition
             safety_settings = [
-                SafetySetting(
-                    category=SafetySetting.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                    threshold=SafetySetting.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE
-                ),
-                SafetySetting(
-                    category=SafetySetting.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                    threshold=SafetySetting.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE
-                ),
-                SafetySetting(
-                    category=SafetySetting.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                    threshold=SafetySetting.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE
-                ),
-                SafetySetting(
-                    category=SafetySetting.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                    threshold=SafetySetting.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE
-                )
-            ]
+    SafetySetting(
+        category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+        threshold=HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+    ),
+    SafetySetting(
+        category=HarmCategory.HARM_CATEGORY_HARASSMENT,
+        threshold=HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+    ),
+    SafetySetting(
+        category=HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+        threshold=HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+    ),
+    SafetySetting(
+        category=HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+        threshold=HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+    ),
+]
             
             self._model = GenerativeModel(
                 model_name=self.settings.GEMINI_MODEL_NAME,
@@ -112,54 +99,34 @@ class GeminiClient:
         except Exception as e:
             logger.error(f"Failed to initialize Gemini client: {e}")
             raise GeminiError(f"Gemini initialization failed: {e}")
-    
+
     async def batch_summarize_clauses(
         self, 
         clauses: List[ClauseCandidate],
         include_negotiation_tips: bool = True
     ) -> List[Dict[str, Any]]:
-        """
-        Batch summarize clauses using Gemini with structured JSON output.
-        
-        Args:
-            clauses: List of clause candidates to summarize
-            include_negotiation_tips: Whether to include negotiation suggestions
-            
-        Returns:
-            List of summarization results with structured data
-        """
+        """Batch summarize clauses using Gemini with structured JSON output."""
         await self.initialize()
         start_time = asyncio.get_event_loop().time()
         
         with LogContext(logger, clause_count=len(clauses)):
             logger.info("Starting batch clause summarization")
-            
-            # Split clauses into batches to manage token limits
             batches = self._create_batches(clauses, self.settings.MAX_CLAUSES_PER_BATCH)
             all_results = []
-            
             for i, batch in enumerate(batches):
                 logger.info(f"Processing batch {i+1}/{len(batches)} with {len(batch)} clauses")
-                
                 try:
                     batch_results = await self._process_batch(batch, include_negotiation_tips)
                     all_results.extend(batch_results)
-                    
-                    # Small delay between batches to avoid rate limiting
                     if i < len(batches) - 1:
                         await asyncio.sleep(0.5)
-                        
                 except Exception as e:
                     logger.error(f"Batch {i+1} failed: {e}")
-                    # Create fallback results for this batch
                     fallback_results = self._create_fallback_results(batch)
                     all_results.extend(fallback_results)
-            
             processing_time = (asyncio.get_event_loop().time() - start_time) * 1000
             log_execution_time(logger, "batch_summarization", processing_time)
-            
             logger.info(f"Batch summarization complete: {len(all_results)} results")
-            
             return all_results
     
     async def _process_batch(
@@ -169,11 +136,9 @@ class GeminiClient:
     ) -> List[Dict[str, Any]]:
         """Process a single batch of clauses."""
         
-        # Build the prompt for batch processing
         system_prompt = self._build_system_prompt(include_negotiation_tips)
         user_prompt = self._build_batch_prompt(clauses)
         
-        # Estimate tokens
         total_tokens = (
             TokenEstimator.estimate_tokens(system_prompt) +
             TokenEstimator.estimate_tokens(user_prompt)
@@ -183,21 +148,15 @@ class GeminiClient:
         
         if total_tokens > self.settings.MAX_PROMPT_TOKENS:
             logger.warning(f"Prompt exceeds token limit, splitting batch")
-            # Recursively split the batch
             mid = len(clauses) // 2
             batch1 = await self._process_batch(clauses[:mid], include_negotiation_tips)
             batch2 = await self._process_batch(clauses[mid:], include_negotiation_tips)
             return batch1 + batch2
         
         try:
-            # Generate content using Gemini
             response = await self._generate_content(system_prompt, user_prompt)
-            
-            # Parse and validate JSON response
             results = self._parse_batch_response(response, clauses)
-            
             return results
-            
         except Exception as e:
             logger.error(f"Batch processing failed: {e}")
             raise GeminiError(f"Failed to process batch: {e}")
@@ -208,25 +167,19 @@ class GeminiClient:
             raise GeminiError("Model not initialized")
         
         try:
-            # Combine system and user prompts
             full_prompt = f"{system_prompt}\n\n{user_prompt}"
-            
-            # Generate content
             response = self._model.generate_content(
                 full_prompt,
                 generation_config={
                     "max_output_tokens": self.settings.MAX_OUTPUT_TOKENS,
-                    "temperature": 0.1,  # Low temperature for consistent structured output
+                    "temperature": 0.1,
                     "top_p": 0.8,
                     "top_k": 40
                 }
             )
-            
             if not response.text:
                 raise GeminiError("Empty response from Gemini")
-            
             return response.text
-            
         except GoogleAPIError as e:
             logger.error(f"Gemini API error: {e}")
             raise GeminiError(f"Gemini API error: {e}")
@@ -236,36 +189,30 @@ class GeminiClient:
     
     def _build_system_prompt(self, include_negotiation_tips: bool) -> str:
         """Build the system prompt for clause summarization."""
-        base_prompt = """You are a legal clarity assistant specialized in simplifying legal documents for non-lawyers. Your task is to:
-
-1. Rephrase complex legal clauses in plain English at approximately 8th grade reading level
-2. Classify each clause into appropriate categories
-3. Assess risk levels based on potential impact to the reader
-4. Output responses in strict JSON format only
-
-IMPORTANT GUIDELINES:
-- Use simple, clear language that non-lawyers can understand
-- Do not add new facts or interpretations not present in the original text
-- Focus on what the clause means in practical terms
-- Be objective and neutral in tone
-- Always provide valid JSON output that can be parsed programmatically"""
-
+        base_prompt = (
+            "You are a legal clarity assistant specialized in simplifying legal documents for non-lawyers. Your task is to:"
+            "\n\n1. Rephrase complex legal clauses in plain English at approximately 8th grade reading level"
+            "\n2. Classify each clause into appropriate categories"
+            "\n3. Assess risk levels based on potential impact to the reader"
+            "\n4. Output responses in strict JSON format only"
+            "\n\nIMPORTANT GUIDELINES:"
+            "\n- Use simple, clear language that non-lawyers can understand"
+            "\n- Do not add new facts or interpretations not present in the original text"
+            "\n- Focus on what the clause means in practical terms"
+            "\n- Be objective and neutral in tone"
+            "\n- Always provide valid JSON output that can be parsed programmatically"
+        )
         if include_negotiation_tips:
             base_prompt += "\n5. Provide brief, generic negotiation tips when appropriate"
-        
         return base_prompt
     
     def _build_batch_prompt(self, clauses: List[ClauseCandidate]) -> str:
         """Build the user prompt for a batch of clauses."""
-        
-        # Build clauses section
         clauses_text = "CLAUSES:\n"
         for i, clause in enumerate(clauses):
             clauses_text += f"===\n"
-            clauses_text += f"{{\"id\": \"clause_{i}\", \"text\": \"{self._escape_json_string(clause.text[:2000])}\"}} \n"
-            clauses_text += f"===\n"
-        
-        # Define expected output format
+            clauses_text += f'{{"id": "clause_{i}", "text": "{self._escape_json_string(clause.text[:2000])}"}} \n'
+            clauses_text += "===\n"
         output_format = {
             "id": "clause_0",
             "summary": "Plain English summary at grade 8 level",
@@ -273,29 +220,25 @@ IMPORTANT GUIDELINES:
             "risk_level": "One of: low, moderate, attention",
             "negotiation_tip": "Brief generic tip or null"
         }
-        
-        prompt = f"""{clauses_text}
-
-Return a JSON array with one object per clause using this exact format:
-{json.dumps([output_format], indent=2)}
-
-Ensure:
-- All strings are properly escaped for JSON
-- Each clause gets exactly one result object
-- Risk levels: 'low' = minimal impact, 'moderate' = notable terms, 'attention' = potentially problematic
-- Negotiation tips should be brief, generic advice (or null if not applicable)
-- Output must be valid, parseable JSON only"""
-        
+        prompt = (
+            f"{clauses_text}\n\nReturn a JSON array with one object per clause using this exact format:\n"
+            f"{json.dumps([output_format], indent=2)}"
+            "\n\nEnsure:"
+            "\n- All strings are properly escaped for JSON"
+            "\n- Each clause gets exactly one result object"
+            "\n- Risk levels: 'low' = minimal impact, 'moderate' = notable terms, 'attention' = potentially problematic"
+            "\n- Negotiation tips should be brief, generic advice (or null if not applicable)"
+            "\n- Output must be valid, parseable JSON only"
+        )
         return prompt
     
     def _escape_json_string(self, text: str) -> str:
         """Escape string for JSON inclusion."""
-        # Basic escaping for JSON strings
-        text = text.replace('\\', '\\\\')
+        text = text.replace("\\", "\\\\")
         text = text.replace('"', '\\"')
-        text = text.replace('\n', '\\n')
-        text = text.replace('\r', '\\r')
-        text = text.replace('\t', '\\t')
+        text = text.replace("\n", "\\n")
+        text = text.replace("\r", "\\r")
+        text = text.replace("\t", "\\t")
         return text
     
     def _parse_batch_response(

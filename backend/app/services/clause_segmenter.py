@@ -22,6 +22,8 @@ class ClauseCandidate:
     confidence: float = 0.0
     page_number: Optional[int] = None
     bounding_box: Optional[Dict[str, float]] = None
+    order: int = 0
+    category: str = "Other"
 
 
 class ClauseSegmenter:

@@ -1,5 +1,5 @@
 """
-Risk analysis service with hybrid LLM + keyword approach
+Risk analysis service with LLM + keyword approach
 """
 import logging
 from typing import Dict, Any, List, Optional, Tuple, Set
@@ -36,7 +36,7 @@ class RiskKeyword:
     risk_weight: float  # 0.0 to 1.0
     categories: List[RiskCategory]
     requires_context: bool = False
-    negative_contexts: List[str] = None  # Contexts that reduce risk
+    negative_contexts: Optional[List[str]] = None  # Contexts that reduce risk
 
 
 @dataclass

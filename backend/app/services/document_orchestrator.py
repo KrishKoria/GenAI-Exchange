@@ -75,10 +75,10 @@ class DocumentOrchestrator:
                 )
                 processing_result["stages_completed"].append("text_extraction")
                 
-                # Create initial document record
-                await self.firestore_client.create_document(
-                    doc_id, filename, len(file_content), 
-                    document_data["page_count"], session_id
+                # Update document with actual page count (document already created in API endpoint)
+                await self.firestore_client.update_document_status(
+                    doc_id, DocumentStatus.PROCESSING, 
+                    {"page_count": document_data["page_count"]}
                 )
                 
                 # Stage 2: Privacy Analysis and PII Masking
