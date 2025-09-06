@@ -8,8 +8,10 @@ from typing import Dict, Any, Optional, Tuple, List
 from pathlib import Path
 import asyncio
 
-from google.cloud import documentai
+from google.cloud import documentai_v1
+from google.api_core.client_options import ClientOptions
 from google.api_core.exceptions import GoogleAPIError
+from google.oauth2 import service_account
 import PyPDF2
 from pdfminer.high_level import extract_text
 from pdfminer.pdfparser import PDFSyntaxError
@@ -30,17 +32,39 @@ class DocumentProcessor:
     
     def __init__(self):
         self.settings = get_settings()
-        self._doc_ai_client: Optional[documentai.DocumentProcessorServiceClient] = None
+        self._doc_ai_client: Optional[documentai_v1.DocumentProcessorServiceClient] = None
         self._processor_name: Optional[str] = None
     
+    def clear_cache(self):
+        """Clear cached client and processor name to force reinitialization."""
+        self._doc_ai_client = None
+        self._processor_name = None
+        logger.info("Cleared Document AI client cache")
+    
     @property
-    def doc_ai_client(self) -> documentai.DocumentProcessorServiceClient:
+    def doc_ai_client(self) -> documentai_v1.DocumentProcessorServiceClient:
         """Lazy initialization of Document AI client."""
         if self._doc_ai_client is None:
-            self._doc_ai_client = documentai.DocumentProcessorServiceClient()
-            # Use project number if available, otherwise use project ID
+            opts = ClientOptions(api_endpoint=f"{self.settings.DOC_AI_LOCATION}-documentai.googleapis.com")
+            
+            # Explicitly use service account credentials if available
+            credentials = None
+            if self.settings.GOOGLE_APPLICATION_CREDENTIALS:
+                logger.info(f"Using service account credentials from {self.settings.GOOGLE_APPLICATION_CREDENTIALS}")
+                credentials = service_account.Credentials.from_service_account_file(
+                    self.settings.GOOGLE_APPLICATION_CREDENTIALS
+                )
+            else:
+                logger.info("Using Application Default Credentials")
+            
+            self._doc_ai_client = documentai_v1.DocumentProcessorServiceClient(
+                client_options=opts,
+                credentials=credentials
+            )
+            
+            # Use PROJECT_NUMBER for processor path (processors are created with PROJECT_NUMBER)
             project_identifier = self.settings.PROJECT_NUMBER or self.settings.PROJECT_ID
-            self._processor_name = self._doc_ai_client.processor_path(
+            self._processor_name = documentai_v1.DocumentProcessorServiceClient.processor_path(
                 project_identifier,
                 self.settings.DOC_AI_LOCATION,
                 self.settings.DOC_AI_PROCESSOR_ID
@@ -125,9 +149,9 @@ class DocumentProcessor:
         """
         try:
             # Create the request
-            request = documentai.ProcessRequest(
+            request = documentai_v1.ProcessRequest(
                 name=self._processor_name,
-                raw_document=documentai.RawDocument(
+                raw_document=documentai_v1.RawDocument(
                     content=file_content,
                     mime_type=mime_type
                 )
