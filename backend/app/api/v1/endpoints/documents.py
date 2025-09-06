@@ -26,9 +26,7 @@ logger = get_logger(__name__)
 
 # Initialize orchestrator
 orchestrator = DocumentOrchestrator()
-
-# Clear any cached Document AI clients to ensure latest configuration is used
-orchestrator.document_processor.clear_cache()
+logger.info("DocumentOrchestrator initialized in documents.py")
 
 
 async def process_document_background(

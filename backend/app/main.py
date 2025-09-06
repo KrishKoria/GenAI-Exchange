@@ -27,6 +27,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(f"Debug mode: {settings.DEBUG}")
     
+    # Initialize and clear Document AI cache to ensure latest configuration
+    logger.info("Initializing DocumentOrchestrator and clearing Document AI cache...")
+    from app.services.document_orchestrator import DocumentOrchestrator
+    orchestrator = DocumentOrchestrator()
+    orchestrator.document_processor.clear_cache()
+    logger.info("Document AI HTTP client cache cleared successfully")
+    
     # Initialize GCP services here if needed
     # await initialize_gcp_services()
     

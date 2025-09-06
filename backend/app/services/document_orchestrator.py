@@ -9,7 +9,7 @@ from datetime import datetime
 
 from app.core.logging import get_logger, LogContext, log_execution_time
 from app.models.document import DocumentStatus, RiskLevel
-from app.services.document_processor import DocumentProcessor, DocumentProcessingError
+from app.services.document_processor_http import DocumentProcessor, DocumentProcessingError
 from app.services.clause_segmenter import ClauseSegmenter, ClauseCandidate
 from app.services.gemini_client import GeminiClient, GeminiError
 from app.services.firestore_client import FirestoreClient, FirestoreError
