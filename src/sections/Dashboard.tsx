@@ -8,8 +8,7 @@ import { Input } from "@/components/ui/input";
 import {
   useDocumentWorkflow,
   useAskQuestion,
-  useDocumentClauses,
-  useDocumentStatus,
+  useDocumentWithClauses,
 } from "@/hooks/useDocuments";
 import { getTopRiskyClauses } from "@/lib/api";
 import { RiskHeatmap } from "@/components/RiskHeatmap";
@@ -45,19 +44,15 @@ export const Dashboard = () => {
   const { upload: uploadDocument } = useDocumentWorkflow();
   const askQuestionMutation = useAskQuestion();
 
-  // Get document status for current document
-  const { data: documentStatus } = useDocumentStatus(
-    currentDocId,
-    !!currentDocId
-  );
+  // Use the composite hook for better data management
+  const { status: statusQuery, clauses: clausesQuery } =
+    useDocumentWithClauses(currentDocId);
 
-  // Get clauses for the current document
-  const {
-    data: clauses = [],
-    isLoading: clausesLoading,
-    error: clausesError,
-    isSuccess: clausesSuccess,
-  } = useDocumentClauses(currentDocId, !!currentDocId);
+  const documentStatus = statusQuery.data;
+  const clauses = useMemo(() => clausesQuery.data || [], [clausesQuery.data]);
+  const clausesLoading = clausesQuery.isLoading;
+  const clausesError = clausesQuery.error;
+  const clausesSuccess = clausesQuery.isSuccess;
 
   const filteredDocs = recentDocs.filter((d) =>
     d.name.toLowerCase().includes(docQuery.toLowerCase())
