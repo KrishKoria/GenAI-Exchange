@@ -2,7 +2,7 @@
 "use client";
 
 import { useRef, useState, useEffect, useMemo } from "react";
-import { Menu, Plus, Upload, Search, FileText, Flame } from "lucide-react";
+import { Menu, Plus, Upload, Search, FileText, Flame, BarChart3, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -13,6 +13,37 @@ import {
 import { getTopRiskyClauses } from "@/lib/api";
 import { RiskHeatmap } from "@/components/RiskHeatmap";
 import { ChatInterface, ChatMessage } from "@/components/ChatInterface";
+import { UploadSuccessCard } from "@/components/UploadSuccessCard";
+import { ReadabilityPanel } from "@/components/ReadabilityPanel";
+// Simple client-side file validation helpers
+const validateFileBasics = (file: File) => {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  // Check file type
+  if (file.type !== 'application/pdf') {
+    errors.push('Only PDF files are supported.');
+  }
+
+  // Check file size (10MB limit)
+  const fileSizeMB = file.size / (1024 * 1024);
+  if (fileSizeMB > 10) {
+    errors.push(`File size (${fileSizeMB.toFixed(1)}MB) exceeds the 10MB limit.`);
+  }
+
+  // Size warnings
+  if (fileSizeMB > 8) {
+    warnings.push(`Large file (${fileSizeMB.toFixed(1)}MB). Processing may take longer.`);
+  }
+
+  return {
+    isValid: errors.length === 0,
+    fileSize: file.size,
+    errors,
+    warnings,
+  };
+};
+import { useToast, createToast } from "@/components/ui/toast";
 
 // ChatGPT-like dashboard for legal document assistant
 // - Left: sidebar with New Chat, Upload, Recent Docs + search
@@ -33,12 +64,28 @@ export const Dashboard = () => {
   ]);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [recentDocs, setRecentDocs] = useState<
     { id: string; name: string; date: string; status?: string }[]
   >([]);
   const [docQuery, setDocQuery] = useState("");
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
   const [currentDocId, setCurrentDocId] = useState<string | null>(null);
+  const [uploadCards, setUploadCards] = useState<{
+    [key: string]: {
+      filename: string;
+      fileSize: number;
+      pageCount?: number;
+      status: 'uploading' | 'processing' | 'completed' | 'failed';
+      error?: string;
+      progress?: number;
+      estimatedTime?: number;
+      clauseCount?: number;
+    };
+  }>({});
+  const [autoDismissTimers, setAutoDismissTimers] = useState<{[key: string]: NodeJS.Timeout}>({});
+
+  const { toast } = useToast();
 
   // API hooks
   const { upload: uploadDocument } = useDocumentWorkflow();
@@ -65,27 +112,46 @@ export const Dashboard = () => {
   async function handleFilesSelected(files: FileList | null) {
     if (!files || files.length === 0) return;
 
+    const file = files[0];
+    const cardId = `upload-${Date.now()}`;
+
     try {
-      // For now, handle single file upload (can be extended for multiple files)
-      const file = files[0];
+      // Basic client-side validation
+      const basicValidation = validateFileBasics(file);
+      if (!basicValidation.isValid) {
+        toast(createToast.error(
+          'Invalid File',
+          basicValidation.errors.join(' ')
+        ));
+        return;
+      }
 
-      // Add upload status message
-      const uploadMsg: ChatMessage = {
-        id: `upload-${Date.now()}`,
-        role: "assistant",
-        content: `Uploading ${file.name}... This may take a moment.`,
-        isLoading: true,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, uploadMsg]);
+      // Show warnings if any
+      if (basicValidation.warnings.length > 0) {
+        toast(createToast.warning(
+          'File Upload Warning',
+          basicValidation.warnings.join(' ')
+        ));
+      }
 
-      // Upload the document
+      // Create upload card
+      setUploadCards((prev) => ({
+        ...prev,
+        [cardId]: {
+          filename: file.name,
+          fileSize: file.size,
+          status: 'uploading',
+          progress: 25,
+        },
+      }));
+
+      // Upload the document (server will validate page count)
       const response = await uploadDocument.mutateAsync({
         file,
         sessionId: `session-${Date.now()}`,
       });
 
-      // Add the document to recent docs
+      // Add to recent docs
       const newDoc = {
         id: response.doc_id,
         name: response.filename,
@@ -97,36 +163,52 @@ export const Dashboard = () => {
       setSelectedDocs([response.doc_id]);
       setCurrentDocId(response.doc_id);
 
-      // Update message to show processing started
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === uploadMsg.id
-            ? {
-                ...msg,
-                content: `${response.filename} uploaded successfully! Processing document...`,
-                isLoading: false,
-              }
-            : msg
-        )
-      );
+      // Update upload card to processing
+      setUploadCards((prev) => ({
+        ...prev,
+        [cardId]: {
+          ...prev[cardId],
+          status: 'processing',
+          progress: 75,
+        },
+      }));
+
+      toast(createToast.success(
+        'Upload Successful',
+        `${file.name} uploaded successfully and is being processed.`
+      ));
+
     } catch (error: unknown) {
       console.error("Upload failed:", error);
 
-      // Show error message
-      setMessages((prev) => [
-        ...prev.filter((msg) => !msg.isLoading),
-        {
-          id: `error-${Date.now()}`,
-          role: "assistant",
-          content: `Sorry, there was an error uploading your document: ${
-            (error as any)?.response?.data?.detail ||
-            (error as Error)?.message ||
-            "Unknown error"
-          }`,
-          error: true,
-          timestamp: new Date(),
+      // Extract error details for better UX
+      const errorResponse = (error as any)?.response;
+      const errorMessage = errorResponse?.data?.detail || 
+                          (error as Error)?.message || 
+                          'An unexpected error occurred while uploading your document.';
+      
+      const isValidationError = errorResponse?.status === 422 || errorResponse?.status === 413;
+
+      // Update upload card to failed
+      setUploadCards((prev) => ({
+        ...prev,
+        [cardId]: {
+          ...prev[cardId],
+          status: 'failed',
+          error: errorMessage,
         },
-      ]);
+      }));
+
+      toast(createToast.error(
+        isValidationError ? 'Document Validation Failed' : 'Upload Failed',
+        errorMessage,
+        {
+          action: {
+            label: 'Try Again',
+            onClick: () => handleFilesSelected(files),
+          },
+        }
+      ));
     }
   }
 
@@ -283,6 +365,53 @@ export const Dashboard = () => {
       )
     );
 
+    // Update upload cards when processing completes
+    setUploadCards((prev) => {
+      const updatedCards = { ...prev };
+      Object.keys(updatedCards).forEach((cardId) => {
+        const card = updatedCards[cardId];
+        if (card.status === 'processing') {
+          if (documentStatus.status === 'completed') {
+            updatedCards[cardId] = {
+              ...card,
+              status: 'completed',
+              progress: 100,
+              clauseCount: documentStatus.clause_count || 0,
+            };
+            
+            // Start auto-dismiss timer for completed cards (5 seconds)
+            const timerId = setTimeout(() => {
+              setUploadCards((currentCards) => {
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                const { [cardId]: removed, ...rest } = currentCards;
+                return rest;
+              });
+              // Clean up timer from state
+              setAutoDismissTimers((timers) => {
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                const { [cardId]: removedTimer, ...restTimers } = timers;
+                return restTimers;
+              });
+            }, 5000);
+            
+            // Store the timer ID
+            setAutoDismissTimers((timers) => ({
+              ...timers,
+              [cardId]: timerId,
+            }));
+            
+          } else if (documentStatus.status === 'failed') {
+            updatedCards[cardId] = {
+              ...card,
+              status: 'failed',
+              error: 'Document processing failed on the server.',
+            };
+          }
+        }
+      });
+      return updatedCards;
+    });
+
     // Update processing message when status changes
     if (
       documentStatus.status === "completed" &&
@@ -336,6 +465,16 @@ export const Dashboard = () => {
     }
   }, [currentDocId, clauses]);
 
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      // Clear all auto-dismiss timers on unmount to prevent memory leaks
+      Object.values(autoDismissTimers).forEach(timerId => {
+        clearTimeout(timerId);
+      });
+    };
+  }, [autoDismissTimers]);
+
   // Convert selected docs to the format expected by ChatInterface
   const selectedDocuments = selectedDocs
     .map((id) => {
@@ -352,7 +491,7 @@ export const Dashboard = () => {
       <aside
         className={`${
           sidebarOpen ? "flex" : "hidden"
-        } md:flex w-72 shrink-0 flex-col border-r border-white/10 bg-[#111111] h-full overflow-hidden`}
+        } md:flex w-80 shrink-0 flex-col border-r border-white/10 bg-[#111111] h-full overflow-hidden`}
       >
         <div className="p-4 flex flex-col gap-4 h-full overflow-hidden">
           {/* Brand + Mobile toggle */}
@@ -456,11 +595,72 @@ export const Dashboard = () => {
           <div className="text-base font-semibold bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
             LegalEase AI
           </div>
-          <div className="w-9" />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setRightPanelOpen(true)}
+            className={currentDocId ? "" : "opacity-50"}
+            disabled={!currentDocId}
+          >
+            <BarChart3 className="h-5 w-5" />
+          </Button>
         </div>
 
+        {/* Desktop analysis panel toggle */}
+        <div className="hidden lg:flex xl:hidden fixed top-4 right-4 z-10">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setRightPanelOpen(!rightPanelOpen)}
+            className={currentDocId ? "" : "opacity-50"}
+            disabled={!currentDocId}
+          >
+            <BarChart3 className="h-4 w-4 mr-2" />
+            Analysis
+          </Button>
+        </div>
+
+        {/* Upload Cards */}
+        {Object.entries(uploadCards).length > 0 && (
+          <div className="p-4 space-y-3 border-b border-white/10">
+            {Object.entries(uploadCards).map(([cardId, card]) => (
+              <UploadSuccessCard
+                key={cardId}
+                filename={card.filename}
+                fileSize={card.fileSize}
+                pageCount={card.pageCount}
+                processingStatus={card.status}
+                error={card.error}
+                uploadProgress={card.progress}
+                estimatedTime={card.estimatedTime}
+                clauseCount={card.clauseCount}
+                onRetry={() => fileInputRef.current?.click()}
+                onDismiss={() => {
+                  // Clear auto-dismiss timer if it exists
+                  const timerId = autoDismissTimers[cardId];
+                  if (timerId) {
+                    clearTimeout(timerId);
+                    setAutoDismissTimers((timers) => {
+                      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                      const { [cardId]: removedTimer, ...restTimers } = timers;
+                      return restTimers;
+                    });
+                  }
+                  
+                  // Remove the card
+                  setUploadCards((prev) => {
+                    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                    const { [cardId]: removed, ...rest } = prev;
+                    return rest;
+                  });
+                }}
+              />
+            ))}
+          </div>
+        )}
+
         {/* Chat Interface - Independent Scroll Area */}
-        <div className="flex-1 w-full max-w-3xl mx-auto bg-[#0B0B0B] h-full overflow-hidden">
+        <div className="flex-1 w-full bg-[#0B0B0B] h-full overflow-hidden px-4">
           <ChatInterface
             messages={messages}
             onSendMessage={sendMessage}
@@ -476,75 +676,114 @@ export const Dashboard = () => {
         </div>
       </section>
 
-      {/* Right Heatmap Panel */}
-      <aside className="hidden xl:flex w-80 shrink-0 flex-col border-l border-white/10 bg-[#111111] h-full overflow-hidden">
+      {/* Mobile Overlay Background */}
+      {rightPanelOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-20 xl:hidden"
+          onClick={() => setRightPanelOpen(false)}
+        />
+      )}
+
+      {/* Right Analysis Panel */}
+      <aside className={`
+        ${rightPanelOpen ? 'flex' : 'hidden'}
+        xl:flex w-96 shrink-0 flex-col border-l border-white/10 bg-[#111111] h-full overflow-hidden
+        fixed xl:relative top-0 right-0 z-30 xl:z-auto
+      `}>
         <div className="p-4 flex flex-col h-full overflow-hidden">
-          <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-white/70 shrink-0">
-            <Flame className="h-4 w-4 text-red-500" /> Risk Heatmap
-          </h3>
+          {/* Panel Header with Close Button */}
+          <div className="flex items-center justify-between mb-4 xl:hidden">
+            <h2 className="text-lg font-semibold text-white">Document Analysis</h2>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setRightPanelOpen(false)}
+            >
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
 
           {/* Document info */}
           {currentDocId && (
-            <div className="mb-4 p-2 rounded-lg bg-[#0F0F0F] border border-white/10 shrink-0">
-              <div className="text-xs text-white/60">Document</div>
-              <div className="text-sm text-white/90">
+            <div className="mb-4 p-3 rounded-lg bg-[#0F0F0F] border border-white/10 shrink-0">
+              <div className="text-xs text-white/60 mb-1">Active Document</div>
+              <div className="text-sm text-white/90 font-medium">
                 {recentDocs.find((d) => d.id === currentDocId)?.name ||
                   "Loading..."}
               </div>
-              <div className="text-xs text-white/50">
+              <div className="text-xs text-white/50 mt-1">
                 {clauses.length} clauses analyzed
               </div>
             </div>
           )}
 
-          {/* Risk Heatmap */}
-          <div className="shrink-0">
-            <RiskHeatmap
-              clauses={clauses || []}
-              isLoading={clausesLoading}
-              error={clausesError}
-            />
-          </div>
+          {/* Scrollable content area */}
+          <div className="flex-1 overflow-y-auto space-y-6 pr-2">
+            {/* Risk Analysis Section */}
+            <div>
+              <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-white/70">
+                <Flame className="h-4 w-4 text-red-500" /> Risk Analysis
+              </h3>
+              
+              <div className="space-y-4">
+                {/* Risk Heatmap */}
+                <RiskHeatmap
+                  clauses={clauses || []}
+                  isLoading={clausesLoading}
+                  error={clausesError}
+                />
 
-          {/* Top risky clauses */}
-          <div className="mt-6 flex flex-col min-h-0 flex-1">
-            <div className="text-xs uppercase tracking-wide text-white/60 shrink-0">
-              Top risky clauses ({topRiskyClauses.length})
-            </div>
-            <div className="mt-2 overflow-y-auto flex-1 space-y-2">
-              {clausesLoading ? (
-                <div className="space-y-2">
-                  {[...Array(3)].map((_, i) => (
-                    <div key={i} className="animate-pulse">
-                      <div className="h-8 bg-gray-700 rounded-lg"></div>
-                    </div>
-                  ))}
-                </div>
-              ) : clausesError ? (
-                <div className="text-xs text-red-400 p-3">
-                  Failed to load clause analysis. Please refresh or try again.
-                </div>
-              ) : topRiskyClauses.length > 0 ? (
-                topRiskyClauses.map((c, index) => (
-                  <div
-                    key={c.clauseId || `${c.k}-${index}`}
-                    className="flex items-center justify-between rounded-lg border border-white/10 bg-[#0F0F0F] px-3 py-2 hover:border-white/20 transition-colors"
-                  >
-                    <div className="text-sm truncate">{c.k}</div>
-                    <div className="text-xs text-white/60 ml-2">
-                      {Math.round(c.risk * 100)}%
-                    </div>
+                {/* Top risky clauses */}
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-white/60 mb-2">
+                    High-Risk Clauses ({topRiskyClauses.length})
                   </div>
-                ))
-              ) : (
-                <div className="text-xs text-white/50 p-3">
-                  {currentDocId && clausesSuccess && clauses.length === 0
-                    ? "No clauses found in document"
-                    : currentDocId
-                    ? "No high-risk clauses found"
-                    : "Upload a document to see risk analysis"}
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {clausesLoading ? (
+                      <div className="space-y-2">
+                        {[...Array(3)].map((_, i) => (
+                          <div key={i} className="animate-pulse">
+                            <div className="h-8 bg-gray-700 rounded-lg"></div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : clausesError ? (
+                      <div className="text-xs text-red-400 p-3 rounded bg-red-500/10">
+                        Failed to load clause analysis. Please refresh or try again.
+                      </div>
+                    ) : topRiskyClauses.length > 0 ? (
+                      topRiskyClauses.map((c, index) => (
+                        <div
+                          key={c.clauseId || `${c.k}-${index}`}
+                          className="flex items-center justify-between rounded-lg border border-white/10 bg-[#0F0F0F] px-3 py-2 hover:border-white/20 transition-colors"
+                        >
+                          <div className="text-sm truncate">{c.k}</div>
+                          <div className="text-xs text-white/60 ml-2">
+                            {Math.round(c.risk * 100)}%
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-xs text-white/50 p-3">
+                        {currentDocId && clausesSuccess && clauses.length === 0
+                          ? "No clauses found in document"
+                          : currentDocId
+                          ? "No high-risk clauses found"
+                          : "Upload a document to see risk analysis"}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
+              </div>
+            </div>
+
+            {/* Readability Analysis Section */}
+            <div>
+              <ReadabilityPanel
+                clauses={clauses || []}
+                isLoading={clausesLoading}
+                error={clausesError}
+              />
             </div>
           </div>
         </div>

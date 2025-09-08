@@ -16,6 +16,7 @@ from app.services.firestore_client import FirestoreClient, FirestoreError
 from app.services.privacy_service import PrivacyService
 from app.services.risk_analyzer import RiskAnalyzer, RiskAssessment
 from app.services.readability_service import ReadabilityService
+from app.services.embeddings_service import EmbeddingsService, EmbeddingsError
 
 logger = get_logger(__name__)
 
@@ -31,6 +32,7 @@ class DocumentOrchestrator:
         self.privacy_service = PrivacyService()
         self.risk_analyzer = RiskAnalyzer()
         self.readability_service = ReadabilityService()
+        self.embeddings_service = EmbeddingsService()
     
     async def process_document_complete(
         self, 
@@ -195,6 +197,20 @@ class DocumentOrchestrator:
                 clause_ids = await self.firestore_client.create_clauses(doc_id, clauses_data)
                 processing_result["stages_completed"].append("data_storage")
                 
+                # Stage 8.5: Generate Embeddings for Clauses (Background Processing)
+                logger.info("Stage 8.5: Generating embeddings for clauses")
+                embeddings_count = 0
+                try:
+                    embeddings_count = await self._generate_clause_embeddings(doc_id, clauses_data)
+                    processing_result["stages_completed"].append("embeddings_generation")
+                    logger.info(f"Successfully generated embeddings for {embeddings_count} clauses")
+                except EmbeddingsError as e:
+                    # Log error but don't fail the entire pipeline - embeddings can be generated later
+                    logger.error(f"Failed to generate embeddings for document {doc_id}: {e}")
+                    processing_result["errors"].append(f"Embeddings generation failed: {e}")
+                    # Add metadata to track this failure
+                    processing_result["stages_completed"].append("embeddings_generation_failed")
+                
                 # Stage 9: Generate Document-Level Analytics
                 logger.info("Stage 9: Document-level analytics")
                 
@@ -211,7 +227,10 @@ class DocumentOrchestrator:
                         "total_clauses": len(clauses_data),
                         "pii_detected": len(pii_matches),
                         "high_risk_clauses": document_risk_profile["risk_distribution"]["attention"],
-                        "avg_readability_improvement": document_readability_analysis["avg_grade_level_reduction"]
+                        "avg_readability_improvement": document_readability_analysis["avg_grade_level_reduction"],
+                        "embeddings_generated": "embeddings_generation" in processing_result["stages_completed"],
+                        "embeddings_failed": "embeddings_generation_failed" in processing_result["stages_completed"],
+                        "embeddings_count": embeddings_count
                     }
                 }
                 
@@ -322,3 +341,61 @@ class DocumentOrchestrator:
         health_status["gemini"] = True      # Could implement actual health check
         
         return health_status
+    
+    async def _generate_clause_embeddings(
+        self, 
+        doc_id: str, 
+        clauses_data: List[Dict[str, Any]]
+    ) -> int:
+        """
+        Generate and store embeddings for all clauses in the document.
+        
+        This method creates embeddings for clause summaries to enable fast similarity
+        search during Q&A operations, eliminating the need to generate embeddings
+        on-demand when users ask questions.
+        
+        Args:
+            doc_id: Document identifier
+            clauses_data: List of clause data dictionaries containing summaries
+            
+        Returns:
+            Number of embeddings successfully generated and stored
+            
+        Raises:
+            EmbeddingsError: If embeddings generation fails
+        """
+        with LogContext(logger, doc_id=doc_id, clause_count=len(clauses_data)):
+            logger.info("Starting background embeddings generation")
+            
+            # Prepare texts for embedding (use summary, fallback to original text)
+            texts = []
+            clause_ids = []
+            
+            for clause_data in clauses_data:
+                # Prefer summary over original text for embeddings
+                text = clause_data.get("summary") or clause_data.get("original_text", "")
+                if text.strip():
+                    texts.append(text)
+                    clause_ids.append(clause_data.get("clause_id"))
+            
+            if not texts:
+                logger.warning("No valid text found in clauses for embedding generation")
+                return 0
+            
+            # Generate embeddings using the batch service
+            logger.info(f"Generating embeddings for {len(texts)} clause texts")
+            embeddings = await self.embeddings_service.generate_embeddings_batch(texts)
+            
+            # Prepare embeddings data for storage
+            embeddings_data = {}
+            for clause_id, embedding in zip(clause_ids, embeddings):
+                if embedding:  # Only store non-empty embeddings
+                    embeddings_data[clause_id] = embedding
+            
+            if embeddings_data:
+                # Store embeddings in Firestore
+                await self.firestore_client.update_clause_embeddings(doc_id, embeddings_data)
+                logger.info(f"Successfully stored embeddings for {len(embeddings_data)} clauses")
+                return len(embeddings_data)
+            else:
+                raise EmbeddingsError("No valid embeddings were generated")

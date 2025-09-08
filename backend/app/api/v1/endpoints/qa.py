@@ -57,32 +57,51 @@ async def ask_question(
                 detail=f"No clauses found for document {request.doc_id}"
             )
         
-        # 2. Filter clauses that have embeddings
+        # 2. Filter clauses that have embeddings (should be pre-generated during document processing)
         clauses_with_embeddings = [
             clause for clause in clauses 
             if clause.get("embedding") and len(clause.get("embedding", [])) > 0
         ]
         
         if not clauses_with_embeddings:
-            # If no embeddings exist, generate them for all clauses
-            logger.info("No embeddings found, generating embeddings for clauses")
-            await _generate_and_store_embeddings(
-                firestore_client, 
-                embeddings_service, 
-                request.doc_id, 
-                clauses
-            )
-            # Reload clauses with embeddings
-            clauses = await firestore_client.get_document_clauses(request.doc_id)
-            clauses_with_embeddings = [
-                clause for clause in clauses 
-                if clause.get("embedding") and len(clause.get("embedding", [])) > 0
-            ]
+            # Embeddings should have been generated during document processing
+            # If they're missing, this indicates a processing failure or incomplete pipeline
+            logger.warning(f"No embeddings found for document {request.doc_id}. Document may be incompletely processed.")
+            
+            # Check document status to understand why embeddings are missing
+            document = await firestore_client.get_document(request.doc_id)
+            if document and document.get("status") != "completed":
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Document is not fully processed yet. Current status: {document.get('status', 'unknown')}. Please wait for processing to complete."
+                )
+            
+            # If document is marked complete but missing embeddings, try to generate them as fallback
+            logger.warning("Document marked as complete but missing embeddings. Generating embeddings as fallback.")
+            try:
+                await _generate_and_store_embeddings(
+                    firestore_client, 
+                    embeddings_service, 
+                    request.doc_id, 
+                    clauses
+                )
+                # Reload clauses with embeddings
+                clauses = await firestore_client.get_document_clauses(request.doc_id)
+                clauses_with_embeddings = [
+                    clause for clause in clauses 
+                    if clause.get("embedding") and len(clause.get("embedding", [])) > 0
+                ]
+            except Exception as fallback_error:
+                logger.error(f"Fallback embeddings generation failed: {fallback_error}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Document processing is incomplete. Embeddings are missing and could not be generated. Please re-upload the document."
+                )
         
         if not clauses_with_embeddings:
             raise HTTPException(
                 status_code=500,
-                detail="Failed to generate embeddings for document clauses"
+                detail="No clauses with embeddings available for similarity search"
             )
         
         # 3. Find most relevant clauses using vector similarity

@@ -5,9 +5,11 @@ import logging
 import asyncio
 from typing import Dict, List, Any, Optional
 from uuid import uuid4
+import io
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import JSONResponse
+from PyPDF2 import PdfReader
 
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
@@ -27,6 +29,48 @@ logger = get_logger(__name__)
 # Initialize orchestrator
 orchestrator = DocumentOrchestrator()
 logger.info("DocumentOrchestrator initialized in documents.py")
+
+
+def validate_pdf_page_count(file_content: bytes, filename: str, max_pages: int) -> int:
+    """
+    Validate PDF page count using PyPDF2.
+    
+    Args:
+        file_content: PDF file content as bytes
+        filename: Original filename for error messages
+        max_pages: Maximum allowed pages
+        
+    Returns:
+        Number of pages in the PDF
+        
+    Raises:
+        HTTPException: If validation fails
+    """
+    try:
+        # Create a BytesIO object from file content
+        pdf_stream = io.BytesIO(file_content)
+        pdf_reader = PdfReader(pdf_stream)
+        page_count = len(pdf_reader.pages)
+        
+        logger.info(f"PDF validation - {filename}: {page_count} pages (max: {max_pages})")
+        
+        if page_count > max_pages:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Document has {page_count} pages, but maximum allowed is {max_pages} pages. Please upload a shorter document."
+            )
+        
+        return page_count
+        
+    except HTTPException:
+        # Re-raise validation errors
+        raise
+    except Exception as e:
+        logger.error(f"Failed to validate PDF page count for {filename}: {e}")
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid PDF file. Please ensure the file is a valid PDF document."
+        )
 
 
 async def process_document_background(
@@ -101,13 +145,18 @@ async def ingest_document(
             detail="Only PDF and DOCX files are supported"
         )
     
+    # Validate page count for PDF files
+    page_count = 0
+    if file.content_type == "application/pdf":
+        page_count = validate_pdf_page_count(file_content, file.filename, settings.MAX_PAGES)
+    
     # Generate document ID
     doc_id = str(uuid4())
     
     try:
         # Create document record immediately to avoid race conditions
         await orchestrator.firestore_client.create_document(
-            doc_id, file.filename, len(file_content), 0, session_id  # page_count will be updated later
+            doc_id, file.filename, len(file_content), page_count, session_id
         )
         
         # Start background processing

@@ -133,7 +133,14 @@ export function useDocumentUpload(options?: UseDocumentUploadOptions) {
       options?.onSuccess?.(data);
     },
     onError: (error: ApiError) => {
-      console.error("Document upload failed:", error);
+      // Don't log validation errors again - the interceptor already handles this
+      const isValidationError = error?.response?.status && 
+        (error.response.status === 422 || error.response.status === 413 || error.response.status === 400);
+      
+      if (!isValidationError) {
+        console.error("Document upload failed:", error);
+      }
+      
       options?.onError?.(error);
     },
   });
@@ -177,7 +184,14 @@ export function useAskQuestion(options?: UseAskQuestionOptions) {
       options?.onSuccess?.(data);
     },
     onError: (error: ApiError) => {
-      console.error("Question failed:", error);
+      // Don't log validation errors again - the interceptor already handles this
+      const isValidationError = error?.response?.status && 
+        (error.response.status === 422 || error.response.status === 413 || error.response.status === 400);
+      
+      if (!isValidationError) {
+        console.error("Question failed:", error);
+      }
+      
       options?.onError?.(error);
     },
   });

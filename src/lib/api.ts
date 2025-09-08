@@ -21,15 +21,35 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response) {
-      // Server responded with error status
-      console.error("API Error:", error.response.status, error.response.data);
+      const status = error.response.status;
+      const data = error.response.data;
+      
+      // Distinguish between validation errors and actual server errors
+      if (status >= 400 && status < 500) {
+        // Client errors (validation, authentication, etc.) - log as info/warning
+        if (status === 422 || status === 413 || status === 400) {
+          // Validation errors - these are expected user feedback, not application errors
+          console.info(`Validation Response [${status}]:`, data?.detail || data);
+        } else if (status === 401 || status === 403) {
+          // Authentication/authorization errors
+          console.warn(`Auth Error [${status}]:`, data?.detail || data);
+        } else {
+          // Other 4xx errors
+          console.warn(`Client Error [${status}]:`, data?.detail || data);
+        }
+      } else if (status >= 500) {
+        // Server errors - these are actual application errors
+        console.error(`Server Error [${status}]:`, data?.detail || data);
+      }
     } else if (error.request) {
-      // Request made but no response received
+      // Request made but no response received - actual network error
       console.error("Network Error:", error.message);
     } else {
-      // Something else happened
-      console.error("Request Error:", error.message);
+      // Something else happened - actual error
+      console.error("Request Setup Error:", error.message);
     }
+    
+    // Still reject the promise so React Query can handle it properly
     return Promise.reject(error);
   }
 );
