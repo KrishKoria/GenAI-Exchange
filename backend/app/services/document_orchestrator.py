@@ -200,18 +200,16 @@ class DocumentOrchestrator:
                 processing_result["stages_completed"].append("data_storage")
                 
                 # Stage 8.5: Generate Embeddings for Clauses (Background Processing)
-                logger.info("Stage 8.5: Generating embeddings for clauses")
-                embeddings_count = 0
-                try:
-                    embeddings_count = await self._generate_clause_embeddings(doc_id, clauses_data)
-                    processing_result["stages_completed"].append("embeddings_generation")
-                    logger.info(f"Successfully generated embeddings for {embeddings_count} clauses")
-                except EmbeddingsError as e:
-                    # Log error but don't fail the entire pipeline - embeddings can be generated later
-                    logger.error(f"Failed to generate embeddings for document {doc_id}: {e}")
-                    processing_result["errors"].append(f"Embeddings generation failed: {e}")
-                    # Add metadata to track this failure
-                    processing_result["stages_completed"].append("embeddings_generation_failed")
+                logger.info("Stage 8.5: Starting background embeddings generation")
+                
+                # Start embeddings generation as a fire-and-forget background task
+                embeddings_task = asyncio.create_task(
+                    self._generate_clause_embeddings_background(doc_id, clauses_data)
+                )
+                
+                # Don't await the task - let it run in the background
+                processing_result["stages_completed"].append("embeddings_background_started")
+                logger.info(f"Background embeddings generation started for {len(clauses_data)} clauses")
                 
                 # Stage 9: Generate Document-Level Analytics
                 logger.info("Stage 9: Document-level analytics")
@@ -230,9 +228,9 @@ class DocumentOrchestrator:
                         "pii_detected": len(pii_matches),
                         "high_risk_clauses": document_risk_profile["risk_distribution"]["attention"],
                         "avg_readability_improvement": document_readability_analysis["avg_grade_level_reduction"],
-                        "embeddings_generated": "embeddings_generation" in processing_result["stages_completed"],
-                        "embeddings_failed": "embeddings_generation_failed" in processing_result["stages_completed"],
-                        "embeddings_count": embeddings_count
+                        "embeddings_started": "embeddings_background_started" in processing_result["stages_completed"],
+                        "embeddings_background": True,
+                        "embeddings_count": 0  # Will be updated when background task completes
                     }
                 }
                 
@@ -401,3 +399,107 @@ class DocumentOrchestrator:
                 return len(embeddings_data)
             else:
                 raise EmbeddingsError("No valid embeddings were generated")
+    
+    async def _generate_clause_embeddings_background(
+        self, 
+        doc_id: str, 
+        clauses_data: List[Dict[str, Any]]
+    ) -> None:
+        """
+        Generate and store embeddings for all clauses in the document as a background task.
+        
+        This method runs in the background and updates the document status when complete.
+        It handles errors gracefully without affecting the main pipeline.
+        
+        Args:
+            doc_id: Document identifier
+            clauses_data: List of clause data dictionaries containing summaries
+        """
+        try:
+            with LogContext(logger, doc_id=doc_id, clause_count=len(clauses_data)):
+                logger.info("Starting background embeddings generation")
+                
+                # Track start time for performance metrics
+                embeddings_start_time = asyncio.get_event_loop().time()
+                
+                # Call the original embeddings method
+                embeddings_count = await self._generate_clause_embeddings(doc_id, clauses_data)
+                
+                # Calculate processing time
+                embeddings_duration = (asyncio.get_event_loop().time() - embeddings_start_time) * 1000
+                
+                # Calculate success/failure rates
+                total_clauses = len(clauses_data)
+                success_rate = (embeddings_count / total_clauses) * 100 if total_clauses > 0 else 0
+                
+                # Update document with successful embeddings completion (metadata only)
+                await self._update_document_metadata(doc_id, {
+                    "processing_statistics.embeddings_completed": True,
+                    "processing_statistics.embeddings_count": embeddings_count,
+                    "processing_statistics.embeddings_total_clauses": total_clauses,
+                    "processing_statistics.embeddings_success_rate": success_rate,
+                    "processing_statistics.embeddings_failed_count": total_clauses - embeddings_count,
+                    "processing_statistics.embeddings_duration_ms": embeddings_duration,
+                    "processing_statistics.embeddings_generated_at": asyncio.get_event_loop().time()
+                })
+                
+                logger.info(f"Background embeddings generation completed: {embeddings_count}/{total_clauses} embeddings generated (Success rate: {success_rate:.1f}%)")
+                
+        except Exception as e:
+            # Log error but don't crash - embeddings can be regenerated later
+            logger.error(f"Background embeddings generation failed for document {doc_id}: {e}")
+            
+            try:
+                # Calculate timing info even for failures
+                embeddings_duration = (asyncio.get_event_loop().time() - embeddings_start_time) * 1000 if 'embeddings_start_time' in locals() else 0
+                
+                # Update document with failure status (metadata only)
+                await self._update_document_metadata(doc_id, {
+                    "processing_statistics.embeddings_completed": False,
+                    "processing_statistics.embeddings_count": 0,
+                    "processing_statistics.embeddings_total_clauses": len(clauses_data),
+                    "processing_statistics.embeddings_success_rate": 0,
+                    "processing_statistics.embeddings_failed_count": len(clauses_data),
+                    "processing_statistics.embeddings_duration_ms": embeddings_duration,
+                    "processing_statistics.embeddings_error": str(e),
+                    "processing_statistics.embeddings_failed_at": asyncio.get_event_loop().time()
+                })
+            except Exception as update_error:
+                logger.error(f"Failed to update embeddings failure status: {update_error}")
+    
+    async def _update_document_metadata(
+        self, 
+        doc_id: str, 
+        metadata_updates: Dict[str, Any]
+    ) -> bool:
+        """
+        Update document metadata without changing status.
+        
+        This is a helper method for background tasks that need to update
+        document metadata without affecting the main document status.
+        
+        Args:
+            doc_id: Document identifier
+            metadata_updates: Dictionary of metadata fields to update
+            
+        Returns:
+            True if update successful
+        """
+        try:
+            # Use Firestore's direct update method to update only metadata
+            doc_ref = self.firestore_client.db.collection("documents").document(doc_id)
+            
+            # Add updated timestamp - import firestore at the top if not already
+            from google.cloud import firestore
+            update_data = metadata_updates.copy()
+            update_data["updated_at"] = firestore.SERVER_TIMESTAMP
+            
+            # Use Firestore's update method directly
+            doc_ref.update(update_data)
+            
+            logger.debug(f"Updated document metadata for {doc_id}: {list(metadata_updates.keys())}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to update document metadata for {doc_id}: {e}")
+            return False

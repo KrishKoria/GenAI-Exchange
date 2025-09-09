@@ -55,8 +55,9 @@ class EmbeddingsService:
             
             text = text.strip()
             
-            # Use the embed_content method from google.generativeai
-            result = genai.embed_content(
+            # Use asyncio.to_thread to make the synchronous API call async
+            result = await asyncio.to_thread(
+                genai.embed_content,
                 model=self.model_name,
                 content=text,
                 task_type="retrieval_document"
@@ -76,19 +77,25 @@ class EmbeddingsService:
             logger.error(f"Error generating embedding: {e}")
             raise EmbeddingsError(f"Embedding generation failed: {e}")
     
-    async def generate_embeddings_batch(self, texts: List[str], batch_size: int = 10) -> List[List[float]]:
+    async def generate_embeddings_batch(
+        self, 
+        texts: List[str], 
+        max_concurrent: int = 5,
+        batch_size: int = 20
+    ) -> List[List[float]]:
         """
-        Generate embeddings for multiple texts in batches.
+        Generate embeddings for multiple texts with parallel processing.
         
         Args:
             texts: List of texts to generate embeddings for
-            batch_size: Number of texts to process in each batch
+            max_concurrent: Maximum number of concurrent requests (default: 5)
+            batch_size: Number of texts to process in parallel batches (default: 20)
             
         Returns:
-            List of embeddings corresponding to input texts
+            List of embeddings corresponding to input texts (None for failed embeddings)
             
         Raises:
-            EmbeddingsError: If batch embedding generation fails
+            EmbeddingsError: If all embeddings fail or critical error occurs
         """
         start_time = time.time()
         
@@ -96,30 +103,59 @@ class EmbeddingsService:
             if not texts:
                 return []
             
-            embeddings = []
+            logger.info(f"Generating embeddings for {len(texts)} texts with max {max_concurrent} concurrent requests")
             
-            # Process in batches to avoid API limits
-            for i in range(0, len(texts), batch_size):
-                batch = texts[i:i + batch_size]
-                batch_embeddings = []
+            # Create semaphore to limit concurrent requests
+            semaphore = asyncio.Semaphore(max_concurrent)
+            
+            async def generate_with_semaphore(text: str, index: int) -> Tuple[int, Optional[List[float]]]:
+                """Generate embedding with concurrency control and error handling."""
+                async with semaphore:
+                    try:
+                        embedding = await self.generate_embedding(text)
+                        return index, embedding
+                    except Exception as e:
+                        logger.warning(f"Failed to generate embedding for text {index}: {e}")
+                        return index, None
+            
+            # Process all texts in parallel with controlled concurrency
+            tasks = [
+                generate_with_semaphore(text, i) 
+                for i, text in enumerate(texts)
+            ]
+            
+            # Use gather with return_exceptions=True to handle individual failures
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Process results and maintain order
+            embeddings = [None] * len(texts)
+            successful_count = 0
+            failed_count = 0
+            
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Task failed with exception: {result}")
+                    failed_count += 1
+                    continue
                 
-                for text in batch:
-                    embedding = await self.generate_embedding(text)
-                    batch_embeddings.append(embedding)
+                index, embedding = result
+                embeddings[index] = embedding
                 
-                embeddings.extend(batch_embeddings)
-                
-                # Small delay between batches to respect rate limits
-                if i + batch_size < len(texts):
-                    await asyncio.sleep(0.1)
+                if embedding is not None:
+                    successful_count += 1
+                else:
+                    failed_count += 1
             
             self._log_execution_time("generate_embeddings_batch", start_time)
-            logger.info(f"Generated {len(embeddings)} embeddings in {len(texts) // batch_size + 1} batches")
+            logger.info(f"Batch embedding generation completed: {successful_count} successful, {failed_count} failed")
+            
+            if successful_count == 0:
+                raise EmbeddingsError("All embedding generation requests failed")
             
             return embeddings
             
         except Exception as e:
-            logger.error(f"Error in batch embedding generation: {e}")
+            logger.error(f"Critical error in batch embedding generation: {e}")
             raise EmbeddingsError(f"Batch embedding generation failed: {e}")
     
     def cosine_similarity(self, embedding1: List[float], embedding2: List[float]) -> float:
