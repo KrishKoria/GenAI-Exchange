@@ -1,7 +1,6 @@
 """
 Document processing orchestrator that coordinates all services
 """
-import logging
 import asyncio
 from typing import Dict, Any, List, Optional
 from uuid import uuid4
@@ -133,32 +132,35 @@ class DocumentOrchestrator:
                 if len(summarization_results) != len(clause_candidates):
                     logger.warning(f"Summarization count mismatch: {len(summarization_results)} vs {len(clause_candidates)}")
                 
-                # Stage 6: Risk Analysis
-                logger.info("Stage 6: Risk analysis")
-                risk_assessments = []
+                # Stages 6 & 7: Risk Analysis and Readability Comparison (Concurrent)
+                logger.info("Stages 6 & 7: Risk analysis and readability analysis (concurrent)")
                 
+                # Create parallel tasks for risk analysis
+                risk_tasks = []
                 for i, (clause, summary_result) in enumerate(zip(clause_candidates, summarization_results)):
-                    risk_assessment = await self.risk_analyzer.analyze_clause_risk(
+                    task = self.risk_analyzer.analyze_clause_risk(
                         clause.text,
                         summary_result.get("summary"),
                         summary_result.get("risk_level"),
                         summary_result.get("category")
                     )
-                    risk_assessments.append(risk_assessment)
+                    risk_tasks.append(task)
                 
-                processing_result["stages_completed"].append("risk_analysis")
-                
-                # Stage 7: Readability Comparison
-                logger.info("Stage 7: Readability improvement analysis")
-                readability_comparisons = []
-                
+                # Create parallel tasks for readability analysis
+                readability_tasks = []
                 for clause, summary_result in zip(clause_candidates, summarization_results):
-                    comparison = await self.readability_service.compare_readability(
+                    task = self.readability_service.compare_readability(
                         clause.text, summary_result.get("summary", "")
                     )
-                    readability_comparisons.append(comparison)
+                    readability_tasks.append(task)
                 
-                processing_result["stages_completed"].append("readability_analysis")
+                # Execute both risk and readability analyses concurrently
+                risk_assessments, readability_comparisons = await asyncio.gather(
+                    asyncio.gather(*risk_tasks),
+                    asyncio.gather(*readability_tasks)
+                )
+                
+                processing_result["stages_completed"].extend(["risk_analysis", "readability_analysis"])
                 
                 # Stage 8: Data Assembly and Storage
                 logger.info("Stage 8: Assembling and storing clause data")

@@ -75,25 +75,36 @@ class GeminiClient:
         clauses: List[ClauseCandidate],
         include_negotiation_tips: bool = True
     ) -> List[Dict[str, Any]]:
-        """Batch summarize clauses using Gemini with structured JSON output."""
+        """Batch summarize clauses using Gemini with structured JSON output and parallel processing."""
         await self.initialize()
         start_time = asyncio.get_event_loop().time()
         
         with LogContext(logger, clause_count=len(clauses)):
             logger.info("Starting batch clause summarization")
             batches = self._create_batches(clauses, self.settings.MAX_CLAUSES_PER_BATCH)
-            all_results = []
+            
+            # Create tasks for all batches to process them in parallel
+            batch_tasks = []
             for i, batch in enumerate(batches):
-                logger.info(f"Processing batch {i+1}/{len(batches)} with {len(batch)} clauses")
+                logger.info(f"Queuing batch {i+1}/{len(batches)} with {len(batch)} clauses")
+                task = asyncio.create_task(
+                    self._process_batch_with_retry(batch, include_negotiation_tips, i+1)
+                )
+                batch_tasks.append(task)
+            
+            logger.info(f"Processing {len(batch_tasks)} batches concurrently...")
+            all_results = []
+            
+            # Process batches as they complete
+            for task in asyncio.as_completed(batch_tasks):
                 try:
-                    batch_results = await self._process_batch(batch, include_negotiation_tips)
+                    batch_results = await task
                     all_results.extend(batch_results)
-                    if i < len(batches) - 1:
-                        await asyncio.sleep(0.5)
                 except Exception as e:
-                    logger.error(f"Batch {i+1} failed: {e}")
-                    fallback_results = self._create_fallback_results(batch)
-                    all_results.extend(fallback_results)
+                    logger.error(f"Batch task failed: {e}")
+                    # Task should have already handled fallback, but add safety check
+                    continue
+            
             processing_time = (asyncio.get_event_loop().time() - start_time) * 1000
             log_execution_time(logger, "batch_summarization", processing_time)
             logger.info(f"Batch summarization complete: {len(all_results)} results")
@@ -131,6 +142,21 @@ class GeminiClient:
             logger.error(f"Batch processing failed: {e}")
             raise GeminiError(f"Failed to process batch: {e}")
     
+    async def _process_batch_with_retry(
+        self, 
+        batch: List[ClauseCandidate], 
+        include_negotiation_tips: bool,
+        batch_num: int
+    ) -> List[Dict[str, Any]]:
+        """Process a batch with error handling and fallback results."""
+        try:
+            logger.info(f"Processing batch {batch_num} with {len(batch)} clauses")
+            return await self._process_batch(batch, include_negotiation_tips)
+        except Exception as e:
+            logger.error(f"Batch {batch_num} failed: {e}")
+            fallback_results = self._create_fallback_results(batch)
+            return fallback_results
+    
     async def _generate_content(self, system_prompt: str, user_prompt: str) -> str:
         """Generate content using Google GenAI client."""
         if not self._client:
@@ -158,7 +184,7 @@ class GeminiClient:
             ]
             
             full_prompt = f"{system_prompt}\n\n{user_prompt}"
-            response = self._client.models.generate_content(
+            response = await self._client.aio.models.generate_content(
                 model=self.settings.GEMINI_MODEL_NAME,
                 contents=full_prompt,
                 config=types.GenerateContentConfig(
