@@ -239,7 +239,7 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
       </div>
 
       {/* Heatmap */}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto no-scrollbar">
         <div className="min-w-max">
           {/* Column headers (Risk Levels) */}
           <div className="flex mb-2">

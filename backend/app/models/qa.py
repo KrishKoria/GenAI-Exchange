@@ -12,6 +12,8 @@ class QuestionRequest(BaseModel):
     doc_id: str = Field(description="Document identifier")
     question: str = Field(description="Question about the document", min_length=1)
     session_id: Optional[str] = Field(description="Session identifier for tracking")
+    chat_session_id: Optional[str] = Field(description="Chat session identifier for memory context", default=None)
+    use_conversation_memory: bool = Field(description="Whether to use conversation memory", default=False)
 
 
 class SourceCitation(BaseModel):
@@ -31,6 +33,8 @@ class AnswerResponse(BaseModel):
     sources: List[SourceCitation] = Field(description="Source citations with snippets")
     additional_insights: Optional[str] = Field(description="Proactive insights and recommendations", default=None)
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    chat_session_id: Optional[str] = Field(description="Associated chat session", default=None)
+    conversation_context_used: bool = Field(description="Whether conversation history was used", default=False)
 
 
 class QAHistory(BaseModel):

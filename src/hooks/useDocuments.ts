@@ -5,9 +5,12 @@ import { useEffect } from "react";
 import {
   documentApi,
   qaApi,
+  chatSessionApi,
   DocumentUploadResponse,
   AnswerResponse,
   QuestionRequest,
+  CreateChatSessionRequest,
+  AddMessageRequest,
 } from "@/lib/api";
 
 // Define proper error type for API responses
@@ -27,6 +30,13 @@ export const documentQueryKeys = {
     ["documents", "clause", docId, clauseId] as const,
   qa: (docId: string) => ["qa", docId] as const,
   qaHistory: (docId: string) => ["qa", "history", docId] as const,
+};
+
+export const chatSessionQueryKeys = {
+  all: ["chatSessions"] as const,
+  lists: () => ["chatSessions", "list"] as const,
+  session: (sessionId: string) =>
+    ["chatSessions", "session", sessionId] as const,
 };
 
 // ========================================
@@ -134,13 +144,16 @@ export function useDocumentUpload(options?: UseDocumentUploadOptions) {
     },
     onError: (error: ApiError) => {
       // Don't log validation errors again - the interceptor already handles this
-      const isValidationError = error?.response?.status && 
-        (error.response.status === 422 || error.response.status === 413 || error.response.status === 400);
-      
+      const isValidationError =
+        error?.response?.status &&
+        (error.response.status === 422 ||
+          error.response.status === 413 ||
+          error.response.status === 400);
+
       if (!isValidationError) {
         console.error("Document upload failed:", error);
       }
-      
+
       options?.onError?.(error);
     },
   });
@@ -185,13 +198,16 @@ export function useAskQuestion(options?: UseAskQuestionOptions) {
     },
     onError: (error: ApiError) => {
       // Don't log validation errors again - the interceptor already handles this
-      const isValidationError = error?.response?.status && 
-        (error.response.status === 422 || error.response.status === 413 || error.response.status === 400);
-      
+      const isValidationError =
+        error?.response?.status &&
+        (error.response.status === 422 ||
+          error.response.status === 413 ||
+          error.response.status === 400);
+
       if (!isValidationError) {
         console.error("Question failed:", error);
       }
-      
+
       options?.onError?.(error);
     },
   });
@@ -350,4 +366,152 @@ export function useRefreshDocument() {
       });
     },
   };
+}
+
+// ========================================
+// CHAT SESSION HOOKS
+// ========================================
+
+/**
+ * Hook to create a new chat session
+ */
+export function useCreateChatSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (request?: CreateChatSessionRequest) =>
+      chatSessionApi.createSession(request),
+    onSuccess: () => {
+      // Invalidate chat sessions list after creating a new one
+      queryClient.invalidateQueries({
+        queryKey: chatSessionQueryKeys.lists(),
+      });
+    },
+  });
+}
+
+/**
+ * Hook to get a specific chat session
+ */
+export function useChatSession(
+  sessionId: string | null,
+  enabled: boolean = true
+) {
+  return useQuery({
+    queryKey: chatSessionQueryKeys.session(sessionId || ""),
+    queryFn: () => chatSessionApi.getSession(sessionId!),
+    enabled: enabled && !!sessionId,
+    staleTime: 30000, // 30 seconds
+    refetchOnWindowFocus: false,
+  });
+}
+
+/**
+ * Hook to list chat sessions
+ */
+export function useChatSessionsList(limit: number = 20) {
+  return useQuery({
+    queryKey: chatSessionQueryKeys.lists(),
+    queryFn: () => chatSessionApi.listSessions(limit),
+    staleTime: 60000, // 1 minute
+    refetchOnWindowFocus: false,
+  });
+}
+
+/**
+ * Hook to add a message to a chat session
+ */
+export function useAddMessage() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      message,
+    }: {
+      sessionId: string;
+      message: AddMessageRequest;
+    }) => chatSessionApi.addMessage(sessionId, message),
+    onSuccess: (_, { sessionId }) => {
+      // Invalidate the specific session to refresh conversation
+      queryClient.invalidateQueries({
+        queryKey: chatSessionQueryKeys.session(sessionId),
+      });
+      // Also invalidate the sessions list to update last activity
+      queryClient.invalidateQueries({
+        queryKey: chatSessionQueryKeys.lists(),
+      });
+    },
+  });
+}
+
+/**
+ * Hook to update document context for a chat session
+ */
+export function useUpdateDocumentContext() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      docIds,
+    }: {
+      sessionId: string;
+      docIds: string[];
+    }) => chatSessionApi.updateDocumentContext(sessionId, docIds),
+    onSuccess: (_, { sessionId }) => {
+      // Invalidate the specific session to refresh document context
+      queryClient.invalidateQueries({
+        queryKey: chatSessionQueryKeys.session(sessionId),
+      });
+    },
+  });
+}
+
+/**
+ * Hook to delete a chat session
+ */
+export function useDeleteChatSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (sessionId: string) => chatSessionApi.deleteSession(sessionId),
+    onSuccess: () => {
+      // Invalidate sessions list after deletion
+      queryClient.invalidateQueries({
+        queryKey: chatSessionQueryKeys.lists(),
+      });
+    },
+  });
+}
+
+/**
+ * Enhanced Q&A hook that supports chat sessions
+ */
+export function useChatAwareAskQuestion() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (
+      request: QuestionRequest & {
+        chat_session_id?: string;
+        use_conversation_memory?: boolean;
+      }
+    ) => {
+      return qaApi.askQuestion(request);
+    },
+    onSuccess: (data, variables) => {
+      // Invalidate Q&A history for the document
+      queryClient.invalidateQueries({
+        queryKey: documentQueryKeys.qaHistory(variables.doc_id),
+      });
+
+      // If this was part of a chat session, invalidate that session too
+      if (variables.chat_session_id) {
+        queryClient.invalidateQueries({
+          queryKey: chatSessionQueryKeys.session(variables.chat_session_id),
+        });
+      }
+    },
+  });
 }

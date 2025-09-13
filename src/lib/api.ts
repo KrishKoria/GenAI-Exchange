@@ -78,7 +78,7 @@ export interface ClauseSummary {
   category: string;
   risk_level: RiskLevel;
   summary: string;
-  readability_delta: number;
+  readability_metrics: ReadabilityMetrics;
   needs_review: boolean;
 }
 
@@ -132,6 +132,8 @@ export interface QuestionRequest {
   doc_id: string;
   question: string;
   session_id?: string;
+  chat_session_id?: string;
+  use_conversation_memory?: boolean;
 }
 
 export interface SourceCitation {
@@ -150,6 +152,8 @@ export interface AnswerResponse {
   sources: SourceCitation[];
   timestamp: string;
   additional_insights?: string;
+  chat_session_id?: string;
+  conversation_context_used?: boolean;
 }
 
 export interface QAHistoryItem {
@@ -157,6 +161,71 @@ export interface QAHistoryItem {
   question: string;
   answer: string;
   clause_ids: string[];
+}
+
+// Chat Session Types
+export type MessageRole = "user" | "assistant" | "system";
+
+export interface ChatMessage {
+  message_id: string;
+  role: MessageRole;
+  content: string;
+  timestamp: string;
+  sources?: Array<{
+    clause_id?: string;
+    clause_number?: number;
+    category?: string;
+    snippet: string;
+    relevance_score: number;
+  }>;
+  metadata?: Record<string, unknown>;
+}
+
+export interface DocumentContext {
+  doc_id: string;
+  selected_at: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ChatSession {
+  session_id: string;
+  created_at: string;
+  last_activity: string;
+  messages: ChatMessage[];
+  document_contexts: DocumentContext[];
+  total_messages: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CreateChatSessionRequest {
+  selected_document_ids?: string[];
+  title?: string;
+  user_id?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AddMessageRequest {
+  role: MessageRole;
+  content: string;
+  sources?: Array<{
+    clause_id?: string;
+    clause_number?: number;
+    category?: string;
+    snippet: string;
+    relevance_score: number;
+  }>;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ChatSessionListResponse {
+  sessions: Array<{
+    session_id: string;
+    created_at: string;
+    last_activity: string;
+    total_messages: number;
+    latest_message_preview?: string;
+    document_count: number;
+  }>;
 }
 
 // ========================================
@@ -254,6 +323,84 @@ export const qaApi = {
     );
 
     return response.data;
+  },
+};
+
+// ========================================
+// CHAT SESSION API
+// ========================================
+
+export const chatSessionApi = {
+  /**
+   * Create a new chat session
+   */
+  async createSession(
+    request?: CreateChatSessionRequest
+  ): Promise<ChatSession> {
+    const response: AxiosResponse<ChatSession> = await apiClient.post(
+      "/api/v1/chat/sessions",
+      request || {}
+    );
+
+    return response.data;
+  },
+
+  /**
+   * Get a specific chat session with full conversation history
+   */
+  async getSession(sessionId: string): Promise<ChatSession> {
+    const response: AxiosResponse<ChatSession> = await apiClient.get(
+      `/api/v1/chat/sessions/${sessionId}`
+    );
+
+    return response.data;
+  },
+
+  /**
+   * List recent chat sessions
+   */
+  async listSessions(limit: number = 20): Promise<ChatSessionListResponse> {
+    const response: AxiosResponse<ChatSessionListResponse> =
+      await apiClient.get(`/api/v1/chat/sessions?limit=${limit}`);
+
+    return response.data;
+  },
+
+  /**
+   * Add a message to a chat session
+   */
+  async addMessage(
+    sessionId: string,
+    message: AddMessageRequest
+  ): Promise<ChatMessage> {
+    const response: AxiosResponse<ChatMessage> = await apiClient.post(
+      `/api/v1/chat/sessions/${sessionId}/messages`,
+      message
+    );
+
+    return response.data;
+  },
+
+  /**
+   * Update document context for a chat session
+   */
+  async updateDocumentContext(
+    sessionId: string,
+    docIds: string[]
+  ): Promise<ChatSession> {
+    const response: AxiosResponse<ChatSession> = await apiClient.put(
+      `/api/v1/chat/sessions/${sessionId}/documents`,
+      { document_ids: docIds }
+    );
+
+    return response.data;
+  },
+
+  /**
+   * Delete a chat session
+   */
+  async deleteSession(sessionId: string): Promise<void> {
+    await apiClient.delete(`/api/v1/chat/sessions/${sessionId}`);
   },
 };
 
@@ -388,6 +535,7 @@ export function getStatusColor(status: DocumentStatus): string {
 const apiExports = {
   documentApi,
   qaApi,
+  chatSessionApi,
   generateRiskHeatmap,
   getTopRiskyClauses,
   formatProcessingMessage,

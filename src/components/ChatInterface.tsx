@@ -253,7 +253,7 @@ export const ChatInterface = ({
   return (
     <div className="flex flex-col h-full bg-[#0F0F0F] overflow-hidden">
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-6 bg-[#0F0F0F] min-h-0">
+      <div className="flex-1 overflow-y-auto no-scrollbar px-4 md:px-6 py-6 space-y-6 bg-[#0F0F0F] min-h-0">
         {messages.length === 0 && !isProcessing && (
           <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
             <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-pink-500 rounded-2xl flex items-center justify-center">

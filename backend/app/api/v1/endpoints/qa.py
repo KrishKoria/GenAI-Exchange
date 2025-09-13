@@ -11,9 +11,11 @@ from google.cloud.firestore import SERVER_TIMESTAMP
 
 from app.core.config import Settings, get_settings
 from app.models.qa import QuestionRequest, AnswerResponse, SourceCitation
+from app.models.chat import MessageRole, AddMessageRequest
 from app.services.firestore_client import FirestoreClient, FirestoreError
 from app.services.embeddings_service import EmbeddingsService, EmbeddingsError
 from app.services.gemini_client import GeminiClient, GeminiError
+from app.services.chat_session_service import ChatSessionService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -26,6 +28,7 @@ async def ask_question(
 ) -> AnswerResponse:
     """
     Ask a question about document clauses using vector similarity search and grounded prompting.
+    Supports both legacy single-doc Q&A and new chat session-based Q&A with memory.
     
     Args:
         request: Question and document context
@@ -46,6 +49,42 @@ async def ask_question(
         firestore_client = FirestoreClient()
         embeddings_service = EmbeddingsService()
         gemini_client = GeminiClient()
+        
+        # Check if this is a chat session-based request
+        conversation_context = ""
+        conversation_context_used = False
+        chat_session_id = None
+        
+        if request.chat_session_id and request.use_conversation_memory:
+            chat_service = ChatSessionService()
+            
+            # Get conversation context from chat session
+            conversation_history, context_summary = await chat_service.get_conversation_context(
+                request.chat_session_id,
+                max_messages=10
+            )
+            
+            if context_summary:
+                conversation_context += f"Previous conversation summary: {context_summary}\n\n"
+            
+            if conversation_history:
+                conversation_context += "Recent conversation:\n"
+                for msg in conversation_history[-5:]:  # Last 5 messages
+                    conversation_context += f"{msg.role.value}: {msg.content}\n"
+                conversation_context += "\n"
+                
+            conversation_context_used = len(conversation_history) > 0 or bool(context_summary)
+            chat_session_id = request.chat_session_id
+            
+            # Add user message to chat session
+            await chat_service.add_message(
+                request.chat_session_id,
+                AddMessageRequest(
+                    role=MessageRole.USER,
+                    content=request.question,
+                    metadata={"doc_id": request.doc_id, "legacy_qa": True}
+                )
+            )
         
         # 1. Verify document exists and get its clauses
         logger.info(f"Fetching clauses for document: {request.doc_id}")
@@ -115,24 +154,46 @@ async def ask_question(
         
         if not relevant_clauses:
             # No relevant clauses found, return informative response
+            answer_text = "I couldn't find any clauses in this document that relate to your question. Please try rephrasing your question or ask about different aspects of the document."
+            
+            # Add to chat session if applicable
+            if chat_session_id:
+                chat_service = ChatSessionService()
+                await chat_service.add_message(
+                    chat_session_id,
+                    AddMessageRequest(
+                        role=MessageRole.ASSISTANT,
+                        content=answer_text,
+                        metadata={"no_relevant_clauses": True, "doc_id": request.doc_id}
+                    )
+                )
+            
             return AnswerResponse(
-                answer="I couldn't find any clauses in this document that relate to your question. Please try rephrasing your question or ask about different aspects of the document.",
+                answer=answer_text,
                 used_clause_ids=[],
                 confidence=0.0,
-                sources=[]
+                sources=[],
+                chat_session_id=chat_session_id,
+                conversation_context_used=conversation_context_used
             )
         
         logger.info(f"Found {len(relevant_clauses)} relevant clauses")
         
-        # 4. Use Gemini for grounded Q&A
+        # 4. Use Gemini for grounded Q&A with conversation context
         logger.info("Generating answer using Gemini")
+        
+        # Prepare enhanced question with conversation context
+        enhanced_question = request.question
+        if conversation_context:
+            enhanced_question = f"Previous context:\n{conversation_context}\n\nCurrent question: {request.question}"
+        
         qa_result = await gemini_client.answer_question(
-            question=request.question,
+            question=enhanced_question,
             relevant_clauses=relevant_clauses,
             doc_id=request.doc_id
         )
         
-        # 5. Store Q&A in history
+        # 5. Store Q&A in history (enhanced with chat context)
         await _store_qa_history(
             firestore_client,
             request,
@@ -156,11 +217,31 @@ async def ask_question(
                     relevance_score=clause.get("similarity", 0.0)  # Use 'similarity' not 'similarity_score'
                 ))
         
+        # 7. Add assistant message to chat session if applicable
+        if chat_session_id:
+            chat_service = ChatSessionService()
+            await chat_service.add_message(
+                chat_session_id,
+                AddMessageRequest(
+                    role=MessageRole.ASSISTANT,
+                    content=qa_result.get("answer", ""),
+                    sources=[source.model_dump() for source in sources],
+                    metadata={
+                        "used_clause_ids": qa_result.get("used_clause_ids", []),
+                        "confidence": qa_result.get("confidence", 0.0),
+                        "doc_id": request.doc_id,
+                        "conversation_context_used": conversation_context_used
+                    }
+                )
+            )
+        
         return AnswerResponse(
             answer=qa_result.get("answer", ""),
             used_clause_ids=qa_result.get("used_clause_ids", []),
             confidence=qa_result.get("confidence", 0.0),
-            sources=sources
+            sources=sources,
+            chat_session_id=chat_session_id,
+            conversation_context_used=conversation_context_used
         )
         
     except HTTPException:

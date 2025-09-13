@@ -3,7 +3,7 @@ API routes configuration
 """
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import documents, health, metrics, qa
+from app.api.v1.endpoints import documents, health, metrics, qa, chat
 
 api_router = APIRouter()
 
@@ -24,6 +24,12 @@ api_router.include_router(
     qa.router,
     prefix="/qa",
     tags=["question-answering"]
+)
+
+api_router.include_router(
+    chat.router,
+    prefix="/chat",
+    tags=["chat-sessions"]
 )
 
 api_router.include_router(

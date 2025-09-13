@@ -16,8 +16,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   useDocumentWorkflow,
-  useAskQuestion,
   useDocumentWithClauses,
+  useCreateChatSession,
+  useChatAwareAskQuestion,
+  useUpdateDocumentContext,
 } from "@/hooks/useDocuments";
 import { getTopRiskyClauses } from "@/lib/api";
 import { RiskHeatmap } from "@/components/RiskHeatmap";
@@ -86,6 +88,12 @@ export const Dashboard = () => {
   const [docQuery, setDocQuery] = useState("");
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
   const [currentDocId, setCurrentDocId] = useState<string | null>(null);
+
+  // Chat session state
+  const [currentChatSessionId, setCurrentChatSessionId] = useState<
+    string | null
+  >(null);
+
   const [uploadCards, setUploadCards] = useState<{
     [key: string]: {
       filename: string;
@@ -106,9 +114,9 @@ export const Dashboard = () => {
 
   // API hooks
   const { upload: uploadDocument } = useDocumentWorkflow();
-  const askQuestionMutation = useAskQuestion();
-
-  // Use the composite hook for better data management
+  const askQuestionMutation = useChatAwareAskQuestion();
+  const createChatSessionMutation = useCreateChatSession();
+  const updateDocumentContextMutation = useUpdateDocumentContext(); // Use the composite hook for better data management
   const { status: statusQuery, clauses: clausesQuery } =
     useDocumentWithClauses(currentDocId);
 
@@ -245,17 +253,44 @@ export const Dashboard = () => {
     setSelectedDocs([]);
   }
 
-  function newChat() {
-    setMessages([
-      {
-        id: "m-welcome",
-        role: "assistant",
-        content:
-          "New chat started. Upload a document or pick from Recent Docs, then ask your questions.",
-        timestamp: new Date(),
-      },
-    ]);
-    setSelectedDocs([]);
+  async function newChat() {
+    try {
+      // Create a new chat session
+      const newSession = await createChatSessionMutation.mutateAsync({
+        selected_document_ids:
+          selectedDocs.length > 0 ? selectedDocs : undefined,
+      });
+
+      // Set the new session as current
+      setCurrentChatSessionId(newSession.session_id);
+
+      // Clear messages and reset to welcome state
+      setMessages([
+        {
+          id: "m-welcome",
+          role: "assistant",
+          content:
+            "New chat session started. Upload a document or pick from Recent Docs, then ask your questions.",
+          timestamp: new Date(),
+        },
+      ]);
+
+      // Keep selected docs for context continuity
+      // setSelectedDocs([]);
+    } catch (error) {
+      console.error("Failed to create new chat session:", error);
+      // Fallback to old behavior if chat session creation fails
+      setMessages([
+        {
+          id: "m-welcome",
+          role: "assistant",
+          content:
+            "New chat started. Upload a document or pick from Recent Docs, then ask your questions.",
+          timestamp: new Date(),
+        },
+      ]);
+      setSelectedDocs([]);
+    }
   }
 
   async function sendMessage(content: string) {
@@ -270,6 +305,35 @@ export const Dashboard = () => {
       };
       setMessages((prev) => [...prev, errorMsg]);
       return;
+    }
+
+    // Create chat session if we don't have one
+    let sessionId = currentChatSessionId;
+    if (!sessionId) {
+      try {
+        const newSession = await createChatSessionMutation.mutateAsync({
+          selected_document_ids:
+            selectedDocs.length > 0 ? selectedDocs : [currentDocId],
+        });
+        sessionId = newSession.session_id;
+        setCurrentChatSessionId(sessionId);
+      } catch (error) {
+        console.error("Failed to create chat session:", error);
+        // Continue without chat session for fallback
+      }
+    }
+
+    // Update document context if needed
+    if (sessionId && selectedDocs.length > 0) {
+      try {
+        await updateDocumentContextMutation.mutateAsync({
+          sessionId,
+          docIds: selectedDocs,
+        });
+      } catch (error) {
+        console.error("Failed to update document context:", error);
+        // Continue anyway
+      }
     }
 
     const userMsg: ChatMessage = {
@@ -290,11 +354,13 @@ export const Dashboard = () => {
     setMessages((prev) => [...prev, userMsg, loadingMsg]);
 
     try {
-      // Ask the question using the API
+      // Ask the question using the chat-aware API
       const response = await askQuestionMutation.mutateAsync({
         doc_id: currentDocId,
         question: content,
-        session_id: `session-${Date.now()}`,
+        session_id: `session-${Date.now()}`, // Keep for backward compatibility
+        chat_session_id: sessionId || undefined,
+        use_conversation_memory: !!sessionId, // Use memory if we have a session
       });
 
       // Format the response with sources
@@ -516,7 +582,7 @@ export const Dashboard = () => {
       <aside
         className={`${
           sidebarOpen ? "flex" : "hidden"
-        } md:flex w-80 shrink-0 flex-col border-r border-white/10 bg-[#111111] h-full overflow-hidden`}
+        } md:flex w-64 shrink-0 flex-col border-r border-white/10 bg-[#111111] h-full overflow-hidden`}
       >
         <div className="p-4 flex flex-col gap-4 h-full overflow-hidden">
           {/* Brand + Language Selector + Mobile toggle */}
@@ -573,7 +639,7 @@ export const Dashboard = () => {
               </Button>
             </div>
 
-            <div className="mt-3 overflow-y-auto flex-1 pr-1 space-y-1">
+            <div className="mt-3 overflow-y-auto no-scrollbar flex-1 pr-1 space-y-1">
               {filteredDocs.length === 0 && (
                 <div className="text-xs text-white/50">No documents found.</div>
               )}
@@ -716,7 +782,7 @@ export const Dashboard = () => {
       <aside
         className={`
         ${rightPanelOpen ? "flex" : "hidden"}
-        xl:flex w-96 shrink-0 flex-col border-l border-white/10 bg-[#111111] h-full overflow-hidden
+        xl:flex w-[28rem] shrink-0 flex-col border-l border-white/10 bg-[#111111] h-full overflow-hidden
         fixed xl:relative top-0 right-0 z-30 xl:z-auto
       `}
       >
@@ -750,7 +816,7 @@ export const Dashboard = () => {
           )}
 
           {/* Scrollable content area */}
-          <div className="flex-1 overflow-y-auto space-y-6 pr-2">
+          <div className="flex-1 overflow-y-auto no-scrollbar space-y-6 pr-2">
             {/* Risk Analysis Section */}
             <div>
               <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-white/70">
