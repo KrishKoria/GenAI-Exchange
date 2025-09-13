@@ -146,6 +146,176 @@ function Compare-Version {
     }
 }
 
+function Test-CorporateEnvironment {
+    Write-Status "Detecting corporate environment..." "Info"
+    
+    $indicators = @()
+    
+    # Check for proxy settings
+    $proxySettings = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -ErrorAction SilentlyContinue
+    if ($proxySettings.ProxyEnable -eq 1) {
+        $indicators += "HTTP Proxy detected: $($proxySettings.ProxyServer)"
+    }
+    
+    # Check for corporate certificate authorities
+    $corporateCAs = Get-ChildItem -Path "Cert:\LocalMachine\Root" | Where-Object { 
+        $_.Subject -notlike "*Microsoft*" -and 
+        $_.Subject -notlike "*VeriSign*" -and 
+        $_.Subject -notlike "*DigiCert*" -and
+        $_.Subject -notlike "*GlobalSign*" -and
+        $_.Subject -notlike "*GeoTrust*" -and
+        $_.Issuer -eq $_.Subject
+    }
+    
+    if ($corporateCAs.Count -gt 0) {
+        $indicators += "Corporate certificate authorities detected: $($corporateCAs.Count)"
+    }
+    
+    # Check for domain environment
+    try {
+        $domain = (Get-WmiObject -Class Win32_ComputerSystem).Domain
+        if ($domain -ne "WORKGROUP") {
+            $indicators += "Domain environment: $domain"
+        }
+    } catch {
+        # Ignore errors
+    }
+    
+    if ($indicators.Count -gt 0) {
+        Write-Status "Corporate environment detected:" "Warning"
+        foreach ($indicator in $indicators) {
+            Write-Status "  - $indicator" "Info"
+        }
+        return $true
+    } else {
+        Write-Status "No corporate environment indicators found" "Success"
+        return $false
+    }
+}
+
+function Set-SSLSecuritySettings {
+    param(
+        [switch]$Disable,
+        [switch]$Restore
+    )
+    
+    if ($Restore) {
+        Write-Status "Restoring SSL security settings..." "Info"
+        # Restore default SSL protocols
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::SystemDefault
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $null
+        return
+    }
+    
+    if ($Disable) {
+        Write-Status "Temporarily disabling SSL certificate validation..." "Warning"
+        # Allow all SSL protocols
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls11 -bor [System.Net.SecurityProtocolType]::Tls
+        # Disable certificate validation (ONLY for this session)
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+    } else {
+        Write-Status "Configuring secure SSL settings..." "Info"
+        # Use TLS 1.2 and above
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls13
+    }
+}
+
+function Invoke-WebRequestWithFallback {
+    param(
+        [string]$Uri,
+        [string]$OutFile = $null,
+        [int]$MaxRetries = 3
+    )
+    
+    $attempt = 0
+    $lastError = $null
+    
+    while ($attempt -lt $MaxRetries) {
+        $attempt++
+        Write-Status "Attempting download from $Uri (attempt $attempt/$MaxRetries)..." "Info"
+        
+        try {
+            if ($OutFile) {
+                Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing
+            } else {
+                return Invoke-WebRequest -Uri $Uri -UseBasicParsing
+            }
+            Write-Status "Download successful" "Success"
+            return $true
+        } catch {
+            $lastError = $_.Exception.Message
+            Write-Status "Download attempt $attempt failed: $lastError" "Warning"
+            
+            if ($lastError -like "*SSL*" -or $lastError -like "*certificate*") {
+                Write-Status "SSL certificate error detected, trying with relaxed security..." "Warning"
+                
+                # Try with SSL validation disabled
+                Set-SSLSecuritySettings -Disable
+                try {
+                    if ($OutFile) {
+                        Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing
+                    } else {
+                        $result = Invoke-WebRequest -Uri $Uri -UseBasicParsing
+                        Set-SSLSecuritySettings -Restore
+                        return $result
+                    }
+                    Write-Status "Download successful with relaxed SSL settings" "Success"
+                    Set-SSLSecuritySettings -Restore
+                    return $true
+                } catch {
+                    $lastError = $_.Exception.Message
+                    Write-Status "Download failed even with relaxed SSL: $lastError" "Error"
+                } finally {
+                    Set-SSLSecuritySettings -Restore
+                }
+            }
+            
+            if ($attempt -lt $MaxRetries) {
+                Write-Status "Waiting 3 seconds before retry..." "Info"
+                Start-Sleep -Seconds 3
+            }
+        }
+    }
+    
+    Write-Status "All download attempts failed. Last error: $lastError" "Error"
+    return $false
+}
+
+function Set-PipTrustedHosts {
+    Write-Status "Configuring pip trusted hosts for corporate environment..." "Info"
+    
+    $trustedHosts = @(
+        "pypi.org",
+        "pypi.python.org", 
+        "files.pythonhosted.org",
+        "download.pytorch.org"
+    )
+    
+    # Create pip config directory if it doesn't exist
+    $pipConfigDir = "$env:APPDATA\pip"
+    if (-not (Test-Path $pipConfigDir)) {
+        New-Item -Path $pipConfigDir -ItemType Directory -Force | Out-Null
+    }
+    
+    $pipConfigFile = Join-Path $pipConfigDir "pip.ini"
+    $trustedHostsString = ($trustedHosts -join " ")
+    
+    $pipConfig = @"
+[global]
+trusted-host = $($trustedHosts -join "`n               ")
+disable-pip-version-check = true
+timeout = 60
+
+[install]
+trusted-host = $($trustedHosts -join "`n               ")
+"@
+    
+    Set-Content -Path $pipConfigFile -Value $pipConfig -Force
+    Write-Status "Pip configuration updated at: $pipConfigFile" "Success"
+    
+    return $trustedHosts
+}
+
 function Install-Chocolatey {
     if ($SkipChocolatey -or (Test-CommandExists "choco")) {
         Write-Status "Chocolatey is already installed" "Success"
@@ -153,22 +323,78 @@ function Install-Chocolatey {
     }
     
     Write-Status "Installing Chocolatey package manager..." "Info"
+    
+    # Detect corporate environment
+    $isCorporate = Test-CorporateEnvironment
+    
     try {
         Set-ExecutionPolicy Bypass -Scope Process -Force
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-        Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        
+        # Method 1: Standard installation
+        Write-Status "Attempting standard Chocolatey installation..." "Info"
+        try {
+            Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        } catch {
+            Write-Status "Standard installation failed: $($_.Exception.Message)" "Warning"
+            
+            # Method 2: Installation with SSL workarounds for corporate environments
+            if ($isCorporate) {
+                Write-Status "Attempting Chocolatey installation with SSL workarounds..." "Info"
+                
+                Set-SSLSecuritySettings -Disable
+                try {
+                    Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+                } finally {
+                    Set-SSLSecuritySettings -Restore
+                }
+            } else {
+                throw $_
+            }
+        }
         
         # Refresh environment
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
         
+        # Wait a moment for the installation to complete
+        Start-Sleep -Seconds 3
+        
         if (Test-CommandExists "choco") {
             Write-Status "Chocolatey installed successfully" "Success"
+            
+            # Configure Chocolatey for corporate environment if needed
+            if ($isCorporate) {
+                Write-Status "Configuring Chocolatey for corporate environment..." "Info"
+                try {
+                    & choco feature enable -n=allowGlobalConfirmation | Out-Null
+                    & choco config set --name=commandExecutionTimeoutSeconds --value=2700 | Out-Null
+                    Write-Status "Chocolatey configured for corporate environment" "Success"
+                } catch {
+                    Write-Status "Failed to configure Chocolatey for corporate environment: $($_.Exception.Message)" "Warning"
+                }
+            }
+            
             return $true
         } else {
             throw "Chocolatey installation verification failed"
         }
     } catch {
         Write-Status "Failed to install Chocolatey: $($_.Exception.Message)" "Error"
+        
+        # Provide manual installation guidance
+        Write-Status "Please install Chocolatey manually:" "Info"
+        Write-Status "1. Open PowerShell as Administrator" "Info"
+        Write-Status "2. Run: Set-ExecutionPolicy Bypass -Scope Process -Force" "Info"
+        
+        if ($isCorporate) {
+            Write-Status "3. For corporate environments, you may need to:" "Info"
+            Write-Status "   - Configure proxy settings in PowerShell" "Info"
+            Write-Status "   - Download install.ps1 manually and run it" "Info"
+            Write-Status "   - Visit: https://chocolatey.org/install for alternative methods" "Info"
+        } else {
+            Write-Status "3. Run: iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))" "Info"
+        }
+        
         return $false
     }
 }
@@ -262,34 +488,140 @@ function Install-Poetry {
         }
     }
     
-    Write-Status "Installing Poetry..." "Info"
-    try {
-        # Install Poetry using the official installer
-        (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
-        
-        # Add Poetry to PATH
-        $poetryPath = "$env:USERPROFILE\.local\bin"
-        $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
-        if ($currentPath -notlike "*$poetryPath*") {
-            [Environment]::SetEnvironmentVariable("Path", "$currentPath;$poetryPath", "User")
+    Write-Status "Installing Poetry with multiple fallback methods..." "Info"
+    
+    # Detect corporate environment
+    $isCorporate = Test-CorporateEnvironment
+    
+    # Method 1: Use pip with trusted hosts (recommended for corporate environments)
+    if ($isCorporate) {
+        Write-Status "Attempting Poetry installation via pip with trusted hosts..." "Info"
+        try {
+            # Configure pip trusted hosts
+            $trustedHosts = Set-PipTrustedHosts
+            
+            # Build pip install command with trusted hosts
+            $trustedHostArgs = ($trustedHosts | ForEach-Object { "--trusted-host $_" }) -join " "
+            $pipCommand = "python -m pip install poetry $trustedHostArgs --user --upgrade"
+            
+            Write-Status "Running: $pipCommand" "Info"
+            Invoke-Expression $pipCommand
+            
+            if ($LASTEXITCODE -eq 0) {
+                # Add Poetry to PATH
+                $poetryPath = "$env:USERPROFILE\.local\bin"
+                $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+                if ($currentPath -notlike "*$poetryPath*") {
+                    [Environment]::SetEnvironmentVariable("Path", "$currentPath;$poetryPath", "User")
+                    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+                }
+                
+                Start-Sleep -Seconds 3
+                if (Test-CommandExists "poetry") {
+                    $installedVersion = & poetry --version 2>$null
+                    Write-Status "Poetry installed successfully via pip: $installedVersion" "Success"
+                    return $true
+                }
+            }
+        } catch {
+            Write-Status "Pip installation method failed: $($_.Exception.Message)" "Warning"
         }
-        
-        # Refresh environment
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-        
-        Start-Sleep -Seconds 5
-        
-        if (Test-CommandExists "poetry") {
-            $installedVersion = & poetry --version 2>$null
-            Write-Status "Poetry installed successfully: $installedVersion" "Success"
-            return $true
+    }
+    
+    # Method 2: Use Chocolatey
+    Write-Status "Attempting Poetry installation via Chocolatey..." "Info"
+    try {
+        if (Test-CommandExists "choco") {
+            & choco install poetry -y --force
+            
+            if ($LASTEXITCODE -eq 0) {
+                # Refresh environment
+                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+                Start-Sleep -Seconds 3
+                
+                if (Test-CommandExists "poetry") {
+                    $installedVersion = & poetry --version 2>$null
+                    Write-Status "Poetry installed successfully via Chocolatey: $installedVersion" "Success"
+                    return $true
+                }
+            }
         } else {
-            throw "Poetry installation verification failed"
+            Write-Status "Chocolatey not available, skipping this method" "Warning"
         }
     } catch {
-        Write-Status "Failed to install Poetry: $($_.Exception.Message)" "Error"
-        return $false
+        Write-Status "Chocolatey installation method failed: $($_.Exception.Message)" "Warning"
     }
+    
+    # Method 3: Official installer with SSL fallback
+    Write-Status "Attempting Poetry installation via official installer..." "Info"
+    try {
+        # Try official installer with our enhanced web request function
+        $installerContent = Invoke-WebRequestWithFallback -Uri "https://install.python-poetry.org"
+        
+        if ($installerContent) {
+            $installerContent.Content | python -
+            
+            # Add Poetry to PATH
+            $poetryPath = "$env:USERPROFILE\.local\bin"
+            $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+            if ($currentPath -notlike "*$poetryPath*") {
+                [Environment]::SetEnvironmentVariable("Path", "$currentPath;$poetryPath", "User")
+                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+            }
+            
+            Start-Sleep -Seconds 5
+            
+            if (Test-CommandExists "poetry") {
+                $installedVersion = & poetry --version 2>$null
+                Write-Status "Poetry installed successfully via official installer: $installedVersion" "Success"
+                return $true
+            }
+        }
+    } catch {
+        Write-Status "Official installer method failed: $($_.Exception.Message)" "Warning"
+    }
+    
+    # Method 4: Manual pip installation without certificate verification (last resort)
+    Write-Status "Attempting Poetry installation with relaxed SSL settings (last resort)..." "Warning"
+    try {
+        Set-SSLSecuritySettings -Disable
+        
+        $pipCommand = "python -m pip install poetry --user --upgrade --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org"
+        Write-Status "Running: $pipCommand" "Info"
+        Invoke-Expression $pipCommand
+        
+        Set-SSLSecuritySettings -Restore
+        
+        if ($LASTEXITCODE -eq 0) {
+            # Add Poetry to PATH
+            $poetryPath = "$env:USERPROFILE\.local\bin"
+            $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+            if ($currentPath -notlike "*$poetryPath*") {
+                [Environment]::SetEnvironmentVariable("Path", "$currentPath;$poetryPath", "User")
+                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+            }
+            
+            Start-Sleep -Seconds 3
+            if (Test-CommandExists "poetry") {
+                $installedVersion = & poetry --version 2>$null
+                Write-Status "Poetry installed successfully with relaxed SSL: $installedVersion" "Success"
+                return $true
+            }
+        }
+    } catch {
+        Write-Status "Final installation method failed: $($_.Exception.Message)" "Warning"
+    } finally {
+        Set-SSLSecuritySettings -Restore
+    }
+    
+    # All methods failed
+    Write-Status "All Poetry installation methods failed!" "Error"
+    Write-Status "Please try installing Poetry manually:" "Info"
+    Write-Status "1. Open PowerShell as Administrator" "Info"
+    Write-Status "2. Run: python -m pip install poetry --user --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org" "Info"
+    Write-Status "3. Add %USERPROFILE%\.local\bin to your PATH environment variable" "Info"
+    
+    return $false
 }
 
 function Install-Git {
@@ -328,26 +660,150 @@ function Install-GoogleCloudCLI {
         return $true
     }
     
-    Write-Status "Installing Google Cloud CLI..." "Info"
+    Write-Status "Installing Google Cloud CLI with multiple fallback methods..." "Info"
+    
+    # Detect corporate environment
+    $isCorporate = Test-CorporateEnvironment
+    
+    # Method 1: Chocolatey with SSL workarounds
+    Write-Status "Attempting Google Cloud CLI installation via Chocolatey..." "Info"
     try {
-        & choco install gcloudsdk -y --force
-        
-        # Refresh environment
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-        
-        Start-Sleep -Seconds 10
-        
-        if (Test-CommandExists "gcloud") {
-            $installedVersion = & gcloud version --quiet 2>$null | Select-String "Google Cloud SDK"
-            Write-Status "Google Cloud CLI installed successfully: $installedVersion" "Success"
-            return $true
+        if (Test-CommandExists "choco") {
+            # Configure Chocolatey to ignore SSL issues if in corporate environment
+            if ($isCorporate) {
+                Write-Status "Configuring Chocolatey for corporate environment..." "Info"
+                & choco config set --name='"'commandExecutionTimeoutSeconds'"' --value='"'2700'"' | Out-Null
+                & choco feature enable -n='"'allowGlobalConfirmation'"' | Out-Null
+            }
+            
+            & choco install gcloudsdk -y --force --ignore-checksums
+            
+            if ($LASTEXITCODE -eq 0) {
+                # Refresh environment
+                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+                Start-Sleep -Seconds 10
+                
+                if (Test-CommandExists "gcloud") {
+                    $installedVersion = & gcloud version --quiet 2>$null | Select-String "Google Cloud SDK"
+                    Write-Status "Google Cloud CLI installed successfully via Chocolatey: $installedVersion" "Success"
+                    return $true
+                }
+            }
         } else {
-            throw "Google Cloud CLI installation verification failed"
+            Write-Status "Chocolatey not available, skipping this method" "Warning"
         }
     } catch {
-        Write-Status "Failed to install Google Cloud CLI: $($_.Exception.Message)" "Error"
-        return $false
+        Write-Status "Chocolatey installation method failed: $($_.Exception.Message)" "Warning"
     }
+    
+    # Method 2: Windows Package Manager (winget)
+    Write-Status "Attempting Google Cloud CLI installation via winget..." "Info"
+    try {
+        if (Test-CommandExists "winget") {
+            & winget install -e --id Google.CloudSDK --silent --accept-package-agreements --accept-source-agreements
+            
+            if ($LASTEXITCODE -eq 0) {
+                # Refresh environment
+                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+                Start-Sleep -Seconds 10
+                
+                if (Test-CommandExists "gcloud") {
+                    $installedVersion = & gcloud version --quiet 2>$null | Select-String "Google Cloud SDK"
+                    Write-Status "Google Cloud CLI installed successfully via winget: $installedVersion" "Success"
+                    return $true
+                }
+            }
+        } else {
+            Write-Status "Windows Package Manager (winget) not available, skipping this method" "Warning"
+        }
+    } catch {
+        Write-Status "Winget installation method failed: $($_.Exception.Message)" "Warning"
+    }
+    
+    # Method 3: Direct download from Google with SSL fallback
+    Write-Status "Attempting Google Cloud CLI installation via direct download..." "Info"
+    try {
+        $gcloudDownloadUrl = "https://dl.google.com/dl/cloudsdk/channels/rapid/GoogleCloudSDKInstaller.exe"
+        $installerPath = Join-Path $env:TEMP "GoogleCloudSDKInstaller.exe"
+        
+        # Try to download the installer using our enhanced web request function
+        if (Invoke-WebRequestWithFallback -Uri $gcloudDownloadUrl -OutFile $installerPath) {
+            Write-Status "Google Cloud SDK installer downloaded successfully" "Success"
+            
+            # Run the installer silently
+            Write-Status "Running Google Cloud SDK installer..." "Info"
+            $process = Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait -PassThru
+            
+            if ($process.ExitCode -eq 0) {
+                # Refresh environment
+                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+                Start-Sleep -Seconds 15
+                
+                if (Test-CommandExists "gcloud") {
+                    $installedVersion = & gcloud version --quiet 2>$null | Select-String "Google Cloud SDK"
+                    Write-Status "Google Cloud CLI installed successfully via direct download: $installedVersion" "Success"
+                    
+                    # Clean up installer
+                    Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+                    return $true
+                } else {
+                    Write-Status "Installation completed but gcloud command not found in PATH" "Warning"
+                    
+                    # Try to find gcloud in common installation paths
+                    $commonPaths = @(
+                        "$env:USERPROFILE\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin",
+                        "$env:ProgramFiles\Google\Cloud SDK\google-cloud-sdk\bin",
+                        "${env:ProgramFiles(x86)}\Google\Cloud SDK\google-cloud-sdk\bin"
+                    )
+                    
+                    foreach ($path in $commonPaths) {
+                        if (Test-Path "$path\gcloud.cmd") {
+                            Write-Status "Found gcloud at: $path" "Success"
+                            # Add to PATH
+                            $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+                            if ($currentPath -notlike "*$path*") {
+                                [Environment]::SetEnvironmentVariable("Path", "$currentPath;$path", "User")
+                                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+                            }
+                            
+                            if (Test-CommandExists "gcloud") {
+                                $installedVersion = & gcloud version --quiet 2>$null | Select-String "Google Cloud SDK"
+                                Write-Status "Google Cloud CLI configured successfully: $installedVersion" "Success"
+                                Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+                                return $true
+                            }
+                            break
+                        }
+                    }
+                }
+            } else {
+                Write-Status "Google Cloud SDK installer failed with exit code: $($process.ExitCode)" "Error"
+            }
+            
+            # Clean up installer
+            Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+        }
+    } catch {
+        Write-Status "Direct download method failed: $($_.Exception.Message)" "Warning"
+    }
+    
+    # Method 4: Manual installation guidance
+    Write-Status "All automated installation methods failed!" "Error"
+    Write-Status "Please install Google Cloud CLI manually:" "Info"
+    Write-Status "1. Visit: https://cloud.google.com/sdk/docs/install" "Info"
+    Write-Status "2. Download the Windows x86_64 installer" "Info"
+    Write-Status "3. Run the installer and follow the setup wizard" "Info"
+    Write-Status "4. After installation, run 'gcloud init' to configure" "Info"
+    
+    if ($isCorporate) {
+        Write-Status "Corporate environment detected - additional steps:" "Warning"
+        Write-Status "1. You may need to configure proxy settings for gcloud" "Info"
+        Write-Status "2. Run: gcloud config set proxy/type http" "Info"
+        Write-Status "3. Run: gcloud config set proxy/address [your-proxy-host]" "Info"
+        Write-Status "4. Run: gcloud config set proxy/port [your-proxy-port]" "Info"
+    }
+    
+    return $false
 }
 
 #endregion
@@ -750,6 +1206,21 @@ function Main {
     Write-ColoredOutput "• GCP Services: Document AI, Vertex AI, Firestore, and more" "Cyan"
     Write-Host ""
     
+    # Early environment detection for better user guidance
+    Write-Status "Performing environment checks..." "Info"
+    $isCorporate = Test-CorporateEnvironment
+    
+    if ($isCorporate) {
+        Write-Host ""
+        Write-Status "Corporate environment detected!" "Warning"
+        Write-ColoredOutput "This script includes special handling for corporate networks:" "Yellow"
+        Write-ColoredOutput "• SSL certificate bypass for downloads" "White"
+        Write-ColoredOutput "• Trusted host configuration for pip/Poetry" "White"
+        Write-ColoredOutput "• Multiple fallback installation methods" "White"
+        Write-ColoredOutput "• Proxy-aware configurations" "White"
+        Write-Host ""
+    }
+    
     if ($SkipGCP) {
         Write-Status "GCP setup will be skipped" "Info"
     }
@@ -765,11 +1236,33 @@ function Main {
     Write-Host ""
     
     try {
-        # Execute phases
+        # Execute phases with enhanced error tracking
+        Write-Status "Starting Phase 1: Prerequisites Installation..." "Info"
         $phase1Success = Initialize-Prerequisites
-        $phase2Success = $phase1Success -and (Initialize-ProjectSetup)
-        $phase3Success = $phase2Success -and (Initialize-GCPSetup)
-        $phase4Success = $phase3Success -and (Test-ProjectSetup)
+        
+        if ($phase1Success) {
+            Write-Status "Starting Phase 2: Project Setup..." "Info"
+            $phase2Success = Initialize-ProjectSetup
+        } else {
+            Write-Status "Phase 1 failed, skipping subsequent phases" "Error"
+            $phase2Success = $false
+        }
+        
+        if ($phase2Success) {
+            Write-Status "Starting Phase 3: GCP Configuration..." "Info"
+            $phase3Success = Initialize-GCPSetup
+        } else {
+            Write-Status "Phase 2 failed, skipping subsequent phases" "Error"
+            $phase3Success = $false
+        }
+        
+        if ($phase3Success) {
+            Write-Status "Starting Phase 4: Testing and Verification..." "Info"
+            $phase4Success = Test-ProjectSetup
+        } else {
+            Write-Status "Phase 3 failed, skipping final verification" "Error"
+            $phase4Success = $false
+        }
         
         Write-Host ""
         Write-Status "=== Setup Summary ===" "Highlight"
@@ -780,15 +1273,78 @@ function Main {
             Write-Status "✓ Setup completed successfully in $($duration.TotalMinutes.ToString('F1')) minutes!" "Success"
             Show-NextSteps
         } else {
-            Write-Status "✗ Setup completed with some issues. Please review the errors above." "Warning"
-            Write-Status "You may need to complete some steps manually." "Info"
+            $endTime = Get-Date
+            $duration = $endTime - $startTime
+            Write-Status "✗ Setup completed with some issues after $($duration.TotalMinutes.ToString('F1')) minutes." "Warning"
+            Write-Status "Please review the errors above and see guidance below." "Info"
+            
+            # Provide specific guidance based on what failed
+            Write-Host ""
+            Write-Status "Troubleshooting guidance:" "Highlight"
+            
+            if (-not $phase1Success) {
+                Write-Status "Prerequisites installation failed:" "Error"
+                Write-Status "1. Check if you have administrator privileges" "Info"
+                Write-Status "2. Verify internet connectivity" "Info"
+                if ($isCorporate) {
+                    Write-Status "3. Corporate environment detected - contact IT if downloads are blocked" "Info"
+                    Write-Status "4. Consider manual installation of failed tools" "Info"
+                }
+            }
+            
+            if ($phase1Success -and -not $phase2Success) {
+                Write-Status "Project setup failed:" "Error"
+                Write-Status "1. Ensure you're in the correct project directory" "Info"
+                Write-Status "2. Check that package.json and pyproject.toml exist" "Info"
+                Write-Status "3. Verify Poetry installation is working: poetry --version" "Info"
+            }
+            
+            if ($phase2Success -and -not $phase3Success) {
+                Write-Status "GCP setup failed:" "Error"
+                Write-Status "1. Check Google Cloud CLI installation: gcloud version" "Info"
+                Write-Status "2. Verify you have a Google Cloud account" "Info"
+                Write-Status "3. Run 'gcloud init' manually to configure authentication" "Info"
+            }
+            
+            Write-Host ""
+            Write-Status "For manual recovery steps, see the log file: $LogFile" "Info"
         }
         
     } catch {
-        Write-Status "Setup failed with error: $($_.Exception.Message)" "Error"
-        Write-Status "Please check the log file for details: $LogFile" "Info"
+        $endTime = Get-Date
+        $duration = $endTime - $startTime
+        Write-Status "Setup failed with critical error after $($duration.TotalMinutes.ToString('F1')) minutes:" "Error"
+        Write-Status "$($_.Exception.Message)" "Error"
+        Write-Host ""
+        
+        # Provide context-specific error guidance
+        if ($isCorporate) {
+            Write-Status "Corporate environment troubleshooting:" "Warning"
+            Write-Status "1. SSL certificate errors may indicate corporate firewall interference" "Info"
+            Write-Status "2. Contact your IT department for:" "Info"
+            Write-Status "   - Proxy server settings" "Info"
+            Write-Status "   - Certificate authority configuration" "Info"
+            Write-Status "   - Whitelisting for development tool downloads" "Info"
+        }
+        
+        Write-Status "General troubleshooting:" "Info"
+        Write-Status "1. Run PowerShell as Administrator" "Info"
+        Write-Status "2. Check internet connectivity" "Info"
+        Write-Status "3. Temporarily disable antivirus if blocking downloads" "Info"
+        Write-Status "4. Check the detailed log file: $LogFile" "Info"
+        
     } finally {
+        Write-Host ""
+        Write-Status "Saving detailed log to: $LogFile" "Info"
         Save-LogFile
+        
+        if ($isCorporate) {
+            Write-Host ""
+            Write-Status "Corporate Environment Notes:" "Highlight"
+            Write-Status "• This script attempted to work around common corporate restrictions" "Info"
+            Write-Status "• If manual intervention is needed, the log contains specific commands to run" "Info"
+            Write-Status "• Share the log file with your IT team if additional support is needed" "Info"
+        }
     }
 }
 
