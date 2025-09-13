@@ -144,9 +144,15 @@ async def ask_question(
         sources = []
         for clause in relevant_clauses:
             if clause.get("clause_id") in qa_result.get("used_clause_ids", []):
+                # Use original text for snippet, truncate to reasonable length
+                original_text = clause.get("original_text", "")
+                snippet = original_text[:300] + "..." if len(original_text) > 300 else original_text
+                
                 sources.append(SourceCitation(
                     clause_id=clause["clause_id"],
-                    snippet=clause.get("summary", clause.get("original_text", ""))[:200],
+                    clause_number=clause.get("order"),  # Use 'order' field as clause number
+                    category=clause.get("category"),
+                    snippet=snippet,
                     relevance_score=clause.get("similarity", 0.0)  # Use 'similarity' not 'similarity_score'
                 ))
         

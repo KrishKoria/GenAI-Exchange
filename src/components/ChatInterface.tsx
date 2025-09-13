@@ -19,6 +19,100 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import ReactMarkdown from "react-markdown";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+
+// Custom markdown component for chat messages
+const ChatMarkdown = ({ content }: { content: string }) => {
+  return (
+    <div className="prose prose-invert prose-sm max-w-none">
+      <ReactMarkdown
+        components={{
+          // Custom code block rendering with syntax highlighting
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          code({ inline, className, children, ...props }: any) {
+            const match = /language-(\w+)/.exec(className || "");
+            return !inline && match ? (
+              <SyntaxHighlighter
+                style={vscDarkPlus as Record<string, React.CSSProperties>}
+                language={match[1]}
+                PreTag="div"
+                className="rounded-md !bg-[#1e1e1e] !mb-4"
+                {...props}
+              >
+                {String(children).replace(/\n$/, "")}
+              </SyntaxHighlighter>
+            ) : (
+              <code
+                className="bg-[#2a2a2a] text-purple-300 px-1.5 py-0.5 rounded text-xs font-mono"
+                {...props}
+              >
+                {children}
+              </code>
+            );
+          },
+          // Custom styling for other elements
+          p: ({ children }) => (
+            <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>
+          ),
+          h1: ({ children }) => (
+            <h1 className="text-lg font-semibold mb-3 text-white">
+              {children}
+            </h1>
+          ),
+          h2: ({ children }) => (
+            <h2 className="text-base font-semibold mb-2 text-white">
+              {children}
+            </h2>
+          ),
+          h3: ({ children }) => (
+            <h3 className="text-sm font-semibold mb-2 text-white">
+              {children}
+            </h3>
+          ),
+          ul: ({ children }) => (
+            <ul className="list-disc list-outside ml-4 mb-3 space-y-2 text-white/90 marker:text-white/90">
+              {children}
+            </ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="list-decimal list-outside ml-4 mb-3 space-y-2 text-white/90 marker:text-white/90">
+              {children}
+            </ol>
+          ),
+          li: ({ children }) => (
+            <li className="text-white/90 leading-relaxed">{children}</li>
+          ),
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-4 border-purple-500/50 pl-4 italic text-white/80 mb-3">
+              {children}
+            </blockquote>
+          ),
+          strong: ({ children }) => (
+            <strong className="font-semibold text-white">{children}</strong>
+          ),
+          em: ({ children }) => (
+            <em className="italic text-white/90">{children}</em>
+          ),
+          a: ({ children, href, ...props }) => (
+            <a
+              href={href}
+              className="text-purple-400 hover:text-purple-300 underline"
+              target="_blank"
+              rel="noopener noreferrer"
+              {...props}
+            >
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+};
 
 export interface ChatMessage {
   id: string;
@@ -222,9 +316,7 @@ export const ChatInterface = ({
                       {message.isLoading ? (
                         renderTypingIndicator()
                       ) : (
-                        <div className="whitespace-pre-wrap">
-                          {message.content}
-                        </div>
+                        <ChatMarkdown content={message.content} />
                       )}
 
                       {/* Sources */}
@@ -341,8 +433,8 @@ export const ChatInterface = ({
                         <User className="w-3 h-3 text-white" />
                       </div>
                     </div>
-                    <div className="text-sm leading-6 whitespace-pre-wrap text-white">
-                      {message.content}
+                    <div className="text-sm leading-6 text-white">
+                      <ChatMarkdown content={message.content} />
                     </div>
 
                     {/* Copy action for user messages */}

@@ -17,6 +17,8 @@ class QuestionRequest(BaseModel):
 class SourceCitation(BaseModel):
     """Model for source citations in answers."""
     clause_id: str = Field(description="Referenced clause identifier")
+    clause_number: Optional[int] = Field(description="Clause number in document", default=None)
+    category: Optional[str] = Field(description="Clause category", default=None)
     snippet: str = Field(description="Relevant text snippet from clause")
     relevance_score: float = Field(description="Relevance score", ge=0, le=1)
 
