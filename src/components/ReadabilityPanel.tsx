@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { BookOpen, TrendingUp, TrendingDown, Minus, Target, Award } from "lucide-react";
+import { BookOpen, TrendingUp, Target, Award } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import type { ClauseSummary } from "@/lib/api";
 
@@ -12,12 +12,18 @@ interface ReadabilityPanelProps {
 }
 
 interface ReadabilityStats {
-  documentGrade: number;
-  averageImprovement: number;
-  totalClauses: number;
-  improvedClauses: number;
+  averageGrade: number;
   averageFleschScore: number;
+  totalClauses: number;
+  highlyDifficultClauses: number;
+  veryDifficultClauses: number;
   readabilityLevel: 'excellent' | 'good' | 'fair' | 'difficult' | 'very-difficult';
+  difficultyDistribution: {
+    easy: number;      // grade <= 9
+    moderate: number;  // grade 9-13
+    difficult: number; // grade 13-16
+    veryDifficult: number; // grade > 16
+  };
 }
 
 // Convert Flesch-Kincaid grade to reading level description
@@ -51,55 +57,76 @@ function getReadabilityColor(level: ReadabilityStats['readabilityLevel']): strin
   }
 }
 
-// Get improvement icon
-function getImprovementIcon(delta: number, size = "h-4 w-4") {
-  if (delta > 1) return <TrendingUp className={`${size} text-green-400`} />;
-  if (delta < -1) return <TrendingDown className={`${size} text-red-400`} />;
-  return <Minus className={`${size} text-gray-400`} />;
-}
 
 export function ReadabilityPanel({ clauses, isLoading, error }: ReadabilityPanelProps) {
   const stats = useMemo<ReadabilityStats>(() => {
     if (!clauses || clauses.length === 0) {
       return {
-        documentGrade: 0,
-        averageImprovement: 0,
-        totalClauses: 0,
-        improvedClauses: 0,
+        averageGrade: 0,
         averageFleschScore: 0,
+        totalClauses: 0,
+        highlyDifficultClauses: 0,
+        veryDifficultClauses: 0,
         readabilityLevel: 'fair',
+        difficultyDistribution: {
+          easy: 0,
+          moderate: 0,
+          difficult: 0,
+          veryDifficult: 0,
+        },
       };
     }
 
     // Calculate aggregate readability statistics
     let totalOriginalGrade = 0;
-    let totalImprovement = 0;
     let totalFleschScore = 0;
-    let improvedCount = 0;
     let validClauses = 0;
+    let highlyDifficultCount = 0; // grade > 13
+    let veryDifficultCount = 0;   // grade > 16
+
+    const distribution = {
+      easy: 0,        // grade <= 9
+      moderate: 0,    // grade 9-13
+      difficult: 0,   // grade 13-16
+      veryDifficult: 0, // grade > 16
+    };
 
     clauses.forEach((clause) => {
-      // Check if clause has readability metrics (might be missing for some clauses)
-      if (clause.readability_delta !== undefined) {
-        totalOriginalGrade += 12; // default grade level when not available
-        totalImprovement += clause.readability_delta;
-        totalFleschScore += 50; // default flesch score when not available
-        if (clause.readability_delta > 0.5) improvedCount++;
+      // Check if clause has readability metrics
+      if (clause.readability_metrics) {
+        const grade = clause.readability_metrics.original_grade || 12;
+        const fleschScore = clause.readability_metrics.flesch_score || 50;
+
+        totalOriginalGrade += grade;
+        totalFleschScore += fleschScore;
         validClauses++;
+
+        // Count difficulty levels
+        if (grade > 16) {
+          veryDifficultCount++;
+          distribution.veryDifficult++;
+        } else if (grade > 13) {
+          highlyDifficultCount++;
+          distribution.difficult++;
+        } else if (grade > 9) {
+          distribution.moderate++;
+        } else {
+          distribution.easy++;
+        }
       }
     });
 
-    const documentGrade = validClauses > 0 ? totalOriginalGrade / validClauses : 12;
-    const averageImprovement = validClauses > 0 ? totalImprovement / validClauses : 0;
+    const averageGrade = validClauses > 0 ? totalOriginalGrade / validClauses : 12;
     const averageFleschScore = validClauses > 0 ? totalFleschScore / validClauses : 50;
 
     return {
-      documentGrade,
-      averageImprovement,
-      totalClauses: clauses.length,
-      improvedClauses: improvedCount,
+      averageGrade,
       averageFleschScore,
-      readabilityLevel: getReadabilityLevel(documentGrade),
+      totalClauses: clauses.length,
+      highlyDifficultClauses: highlyDifficultCount,
+      veryDifficultClauses: veryDifficultCount,
+      readabilityLevel: getReadabilityLevel(averageGrade),
+      difficultyDistribution: distribution,
     };
   }, [clauses]);
 
@@ -151,9 +178,9 @@ export function ReadabilityPanel({ clauses, isLoading, error }: ReadabilityPanel
         {/* Document Grade Level */}
         <div className="text-center p-3 rounded-lg bg-[#121212] border border-white/5">
           <div className={`text-2xl font-bold ${getReadabilityColor(stats.readabilityLevel)}`}>
-            {stats.documentGrade.toFixed(1)}
+            {stats.averageGrade.toFixed(1)}
           </div>
-          <div className="text-xs text-white/60">Grade Level</div>
+          <div className="text-xs text-white/60">Average Grade</div>
           <div className="text-xs text-white/40 capitalize">
             {stats.readabilityLevel.replace('-', ' ')}
           </div>
@@ -171,61 +198,76 @@ export function ReadabilityPanel({ clauses, isLoading, error }: ReadabilityPanel
         </div>
       </div>
 
-      {/* Improvement Stats */}
+      {/* Difficulty Stats */}
       <div className="space-y-3 mb-4">
         <div className="flex items-center justify-between p-2 rounded bg-[#121212] border border-white/5">
           <div className="flex items-center gap-2">
-            {getImprovementIcon(stats.averageImprovement)}
-            <span className="text-sm text-white/80">Average Improvement</span>
+            <TrendingUp className="h-4 w-4 text-red-400" />
+            <span className="text-sm text-white/80">Highly Difficult</span>
           </div>
           <div className="text-sm font-medium text-white">
-            {stats.averageImprovement > 0 ? '+' : ''}{stats.averageImprovement.toFixed(1)} grades
+            {stats.highlyDifficultClauses} / {stats.totalClauses}
           </div>
         </div>
 
         <div className="flex items-center justify-between p-2 rounded bg-[#121212] border border-white/5">
           <div className="flex items-center gap-2">
-            <Target className="h-4 w-4 text-green-400" />
-            <span className="text-sm text-white/80">Improved Clauses</span>
+            <Target className="h-4 w-4 text-orange-400" />
+            <span className="text-sm text-white/80">Very Difficult</span>
           </div>
           <div className="text-sm font-medium text-white">
-            {stats.improvedClauses} / {stats.totalClauses}
+            {stats.veryDifficultClauses} / {stats.totalClauses}
           </div>
         </div>
       </div>
 
-      {/* Progress Bar for Improved Clauses */}
+      {/* Difficulty Distribution */}
       <div className="mb-4">
-        <div className="flex justify-between text-xs text-white/60 mb-1">
-          <span>Improvement Progress</span>
-          <span>{Math.round((stats.improvedClauses / stats.totalClauses) * 100)}%</span>
-        </div>
-        <div className="w-full bg-white/10 rounded-full h-2">
-          <div 
-            className="bg-gradient-to-r from-green-500 to-blue-500 h-2 rounded-full transition-all duration-300"
-            style={{ width: `${(stats.improvedClauses / stats.totalClauses) * 100}%` }}
-          />
+        <div className="text-xs text-white/60 mb-2">Difficulty Distribution</div>
+        <div className="grid grid-cols-4 gap-1 text-xs">
+          <div className="text-center p-2 rounded bg-green-500/20 text-green-300">
+            <div className="font-medium">{stats.difficultyDistribution.easy}</div>
+            <div className="text-[10px] opacity-70">Easy</div>
+          </div>
+          <div className="text-center p-2 rounded bg-blue-500/20 text-blue-300">
+            <div className="font-medium">{stats.difficultyDistribution.moderate}</div>
+            <div className="text-[10px] opacity-70">Moderate</div>
+          </div>
+          <div className="text-center p-2 rounded bg-orange-500/20 text-orange-300">
+            <div className="font-medium">{stats.difficultyDistribution.difficult}</div>
+            <div className="text-[10px] opacity-70">Difficult</div>
+          </div>
+          <div className="text-center p-2 rounded bg-red-500/20 text-red-300">
+            <div className="font-medium">{stats.difficultyDistribution.veryDifficult}</div>
+            <div className="text-[10px] opacity-70">Very Hard</div>
+          </div>
         </div>
       </div>
 
-      {/* Readability Tips */}
+      {/* Readability Insights */}
       <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
         <div className="flex items-center gap-2 mb-2">
           <Award className="h-4 w-4 text-blue-400" />
           <span className="text-sm font-medium text-blue-300">Readability Insights</span>
         </div>
         <div className="text-xs text-white/70 space-y-1">
-          {stats.documentGrade > 12 && (
+          {stats.averageGrade > 16 && (
+            <div>• Document requires graduate-level reading ability</div>
+          )}
+          {stats.averageGrade > 12 && stats.averageGrade <= 16 && (
             <div>• Document complexity is above high school level</div>
           )}
-          {stats.averageImprovement > 2 && (
-            <div>• Excellent simplification achieved in summaries</div>
+          {stats.veryDifficultClauses > 0 && (
+            <div>• {stats.veryDifficultClauses} clauses require graduate-level comprehension</div>
           )}
-          {stats.averageFleschScore < 50 && (
-            <div>• Consider requesting simpler explanations for complex clauses</div>
+          {stats.averageFleschScore < 30 && (
+            <div>• Text is very difficult to read - consider seeking expert advice</div>
           )}
-          {stats.improvedClauses / stats.totalClauses < 0.5 && (
-            <div>• Some clauses may benefit from further clarification</div>
+          {stats.averageFleschScore < 50 && stats.averageFleschScore >= 30 && (
+            <div>• Document is challenging for general readers</div>
+          )}
+          {stats.difficultyDistribution.easy > stats.totalClauses * 0.5 && (
+            <div>• Most clauses are reasonably accessible to read</div>
           )}
         </div>
       </div>

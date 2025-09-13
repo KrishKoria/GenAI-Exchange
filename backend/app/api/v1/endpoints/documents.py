@@ -244,15 +244,20 @@ async def get_document_clauses(
         # Convert to ClauseSummary models
         clause_summaries = []
         for clause_data in clauses_data:
-            readability_metrics = clause_data.get("readability_metrics", {})
-            
+            readability_metrics_data = clause_data.get("readability_metrics", {})
+
             summary = ClauseSummary(
                 clause_id=clause_data.get("clause_id", ""),
                 order=clause_data.get("order", 0),
                 category=clause_data.get("category", "Other"),
                 risk_level=clause_data.get("risk_level", "moderate"),
                 summary=clause_data.get("summary", ""),
-                readability_delta=readability_metrics.get("delta", 0.0),
+                readability_metrics=ReadabilityMetrics(
+                    original_grade=readability_metrics_data.get("original_grade", 0.0),
+                    summary_grade=readability_metrics_data.get("summary_grade", 0.0),
+                    delta=readability_metrics_data.get("delta", 0.0),
+                    flesch_score=readability_metrics_data.get("flesch_score", 0.0)
+                ),
                 needs_review=clause_data.get("needs_review", False)
             )
             clause_summaries.append(summary)

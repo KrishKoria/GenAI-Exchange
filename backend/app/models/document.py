@@ -39,7 +39,7 @@ class ClauseSummary(BaseModel):
     category: str = Field(description="Clause category/type")
     risk_level: RiskLevel = Field(description="Risk assessment level")
     summary: str = Field(description="Plain-language summary")
-    readability_delta: float = Field(description="Readability improvement (grade levels)")
+    readability_metrics: 'ReadabilityMetrics' = Field(description="Readability analysis metrics")
     needs_review: bool = Field(description="Flagged for manual review")
 
 
