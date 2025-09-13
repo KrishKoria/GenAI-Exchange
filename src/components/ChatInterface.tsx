@@ -166,6 +166,8 @@ export const ChatInterface = ({
 }: ChatInterfaceProps) => {
   const [input, setInput] = useState("");
   const [isComposing, setIsComposing] = useState(false);
+  const [showTypingHint, setShowTypingHint] = useState(false);
+  const [typingTimer, setTypingTimer] = useState<NodeJS.Timeout | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -183,6 +185,15 @@ export const ChatInterface = ({
       textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
     }
   }, [input]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (typingTimer) {
+        clearTimeout(typingTimer);
+      }
+    };
+  }, [typingTimer]);
 
   const handleSend = () => {
     const content = input.trim();
@@ -284,7 +295,7 @@ export const ChatInterface = ({
             {message.role === "assistant" ? (
               <div className="mr-auto max-w-[85%] group">
                 <Card className="bg-[#121212] border-white/10 hover:border-white/20 transition-colors">
-                  <CardContent className="p-4">
+                  <CardContent className="p-3">
                     {/* Header */}
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2 text-white/70">
@@ -421,7 +432,7 @@ export const ChatInterface = ({
             ) : message.role === "user" ? (
               <div className="ml-auto max-w-[85%] group">
                 <Card className="bg-gradient-to-br from-[#1a1a1a] to-[#18181B] border-white/10">
-                  <CardContent className="p-4">
+                  <CardContent className="p-3">
                     <div className="flex items-center justify-end gap-2 text-white mb-2">
                       {message.timestamp && (
                         <span className="text-xs text-white/40">
@@ -543,10 +554,32 @@ export const ChatInterface = ({
                   onChange={(e) => {
                     setInput(e.target.value);
                     setIsComposing(e.target.value.length > 0);
+
+                    // Handle typing hint logic
+                    if (e.target.value.length > 10 && !disabled) {
+                      setShowTypingHint(true);
+
+                      // Clear existing timer
+                      if (typingTimer) {
+                        clearTimeout(typingTimer);
+                      }
+
+                      // Set new timer to hide hint after 3 seconds of no typing
+                      const newTimer = setTimeout(() => {
+                        setShowTypingHint(false);
+                      }, 3000);
+                      setTypingTimer(newTimer);
+                    } else {
+                      setShowTypingHint(false);
+                      if (typingTimer) {
+                        clearTimeout(typingTimer);
+                        setTypingTimer(null);
+                      }
+                    }
                   }}
                   onKeyDown={handleKeyDown}
                   placeholder={disabled ? "Please wait..." : placeholder}
-                  disabled={disabled || isProcessing}
+                  disabled={disabled}
                   className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-white/40 text-white max-h-[120px] leading-5"
                   style={{ minHeight: "20px" }}
                 />
@@ -575,8 +608,8 @@ export const ChatInterface = ({
           </div>
 
           {/* Typing indicator */}
-          {isComposing && !disabled && (
-            <div className="absolute -top-8 left-3 text-xs text-white/50 bg-[#0F0F0F] px-2 py-1 rounded border border-white/10">
+          {showTypingHint && !disabled && (
+            <div className="absolute -top-8 left-3 text-xs text-white/40 bg-[#0F0F0F] px-2 py-1 rounded border border-white/5 transition-opacity duration-200">
               <Clock className="w-3 h-3 inline mr-1" />
               Press Enter to send, Shift+Enter for new line
             </div>

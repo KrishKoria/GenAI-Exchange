@@ -440,18 +440,23 @@ class ChatSessionService:
         """Get messages for a session, ordered by timestamp."""
         try:
             db = self.firestore_client.db
-            messages_ref = (
-                db.collection(self.sessions_collection)
-                .document(session_id)
-                .collection(self.messages_collection)
-                .order_by("timestamp", direction="ASCENDING")
-            )
             
             if limit:
-                # Get most recent messages
+                # Get most recent messages (descending order) then reverse
                 messages_ref = (
-                    messages_ref.order_by("timestamp", direction="DESCENDING")
+                    db.collection(self.sessions_collection)
+                    .document(session_id)
+                    .collection(self.messages_collection)
+                    .order_by("timestamp", direction="DESCENDING")
                     .limit(limit)
+                )
+            else:
+                # Get all messages in ascending order
+                messages_ref = (
+                    db.collection(self.sessions_collection)
+                    .document(session_id)
+                    .collection(self.messages_collection)
+                    .order_by("timestamp", direction="ASCENDING")
                 )
             
             messages = []
