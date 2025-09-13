@@ -120,3 +120,91 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, and Opera */
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+}
+
+/* Font classes for Indian languages */
+.font-hindi {
+  font-family: "Noto Sans Devanagari", system-ui, -apple-system, sans-serif;
+}
+
+.font-bengali {
+  font-family: "Noto Sans Bengali", system-ui, -apple-system, sans-serif;
+}
+
+.font-tamil {
+  font-family: "Noto Sans Tamil", system-ui, -apple-system, sans-serif;
+}
+
+.font-telugu {
+  font-family: "Noto Sans Telugu", system-ui, -apple-system, sans-serif;
+}
+
+.font-gujarati {
+  font-family: "Noto Sans Gujarati", system-ui, -apple-system, sans-serif;
+}
+
+.font-kannada {
+  font-family: "Noto Sans Kannada", system-ui, -apple-system, sans-serif;
+}
+
+.font-malayalam {
+  font-family: "Noto Sans Malayalam", system-ui, -apple-system, sans-serif;
+}
+
+.font-punjabi {
+  font-family: "Noto Sans Gurmukhi", system-ui, -apple-system, sans-serif;
+}
+
+.font-urdu {
+  font-family: "Noto Nastaliq Urdu", system-ui, -apple-system, sans-serif;
+  direction: rtl;
+}
+
+/* Language-specific text styling */
+.lang-hi,
+.lang-mr {
+  font-family: "Noto Sans Devanagari", system-ui, -apple-system, sans-serif;
+}
+
+.lang-bn {
+  font-family: "Noto Sans Bengali", system-ui, -apple-system, sans-serif;
+}
+
+.lang-ta {
+  font-family: "Noto Sans Tamil", system-ui, -apple-system, sans-serif;
+}
+
+.lang-te {
+  font-family: "Noto Sans Telugu", system-ui, -apple-system, sans-serif;
+}
+
+.lang-gu {
+  font-family: "Noto Sans Gujarati", system-ui, -apple-system, sans-serif;
+}
+
+.lang-kn {
+  font-family: "Noto Sans Kannada", system-ui, -apple-system, sans-serif;
+}
+
+.lang-ml {
+  font-family: "Noto Sans Malayalam", system-ui, -apple-system, sans-serif;
+}
+
+.lang-pa {
+  font-family: "Noto Sans Gurmukhi", system-ui, -apple-system, sans-serif;
+}
+
+.lang-ur {
+  font-family: "Noto Nastaliq Urdu", system-ui, -apple-system, sans-serif;
+  direction: rtl;
+  text-align: right;
+}

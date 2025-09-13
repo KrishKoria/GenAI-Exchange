@@ -28,6 +28,9 @@ export interface ChatMessage {
   isLoading?: boolean;
   error?: boolean;
   sources?: Array<{
+    clause_id?: string;
+    clause_number?: number;
+    category?: string;
     snippet: string;
     relevance_score: number;
   }>;
@@ -238,7 +241,9 @@ export const ChatInterface = ({
                               >
                                 <div className="flex items-center justify-between mb-1">
                                   <span className="font-medium">
-                                    Source {idx + 1}
+                                    {source.clause_number && source.category
+                                      ? `Clause ${source.clause_number} (${source.category})`
+                                      : `Source ${idx + 1}`}
                                   </span>
                                   <span className="text-purple-400">
                                     {source.relevance_score > 0

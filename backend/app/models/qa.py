@@ -27,6 +27,7 @@ class AnswerResponse(BaseModel):
     used_clause_ids: List[str] = Field(description="List of clause IDs used for answer")
     confidence: float = Field(description="Answer confidence score", ge=0, le=1)
     sources: List[SourceCitation] = Field(description="Source citations with snippets")
+    additional_insights: Optional[str] = Field(description="Proactive insights and recommendations", default=None)
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 

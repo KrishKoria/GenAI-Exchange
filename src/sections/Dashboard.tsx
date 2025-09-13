@@ -2,7 +2,16 @@
 "use client";
 
 import { useRef, useState, useEffect, useMemo } from "react";
-import { Menu, Plus, Upload, Search, FileText, Flame, BarChart3, X } from "lucide-react";
+import {
+  Menu,
+  Plus,
+  Upload,
+  Search,
+  FileText,
+  Flame,
+  BarChart3,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -15,25 +24,31 @@ import { RiskHeatmap } from "@/components/RiskHeatmap";
 import { ChatInterface, ChatMessage } from "@/components/ChatInterface";
 import { UploadSuccessCard } from "@/components/UploadSuccessCard";
 import { ReadabilityPanel } from "@/components/ReadabilityPanel";
+import { LanguageSelector } from "@/components/LanguageSelector";
+import { useTranslations } from "next-intl";
 // Simple client-side file validation helpers
 const validateFileBasics = (file: File) => {
   const errors: string[] = [];
   const warnings: string[] = [];
 
   // Check file type
-  if (file.type !== 'application/pdf') {
-    errors.push('Only PDF files are supported.');
+  if (file.type !== "application/pdf") {
+    errors.push("Only PDF files are supported.");
   }
 
   // Check file size (10MB limit)
   const fileSizeMB = file.size / (1024 * 1024);
   if (fileSizeMB > 10) {
-    errors.push(`File size (${fileSizeMB.toFixed(1)}MB) exceeds the 10MB limit.`);
+    errors.push(
+      `File size (${fileSizeMB.toFixed(1)}MB) exceeds the 10MB limit.`
+    );
   }
 
   // Size warnings
   if (fileSizeMB > 8) {
-    warnings.push(`Large file (${fileSizeMB.toFixed(1)}MB). Processing may take longer.`);
+    warnings.push(
+      `Large file (${fileSizeMB.toFixed(1)}MB). Processing may take longer.`
+    );
   }
 
   return {
@@ -51,14 +66,14 @@ import { useToast, createToast } from "@/components/ui/toast";
 // - Right: risk heatmap panel for the current thread
 
 export const Dashboard = () => {
+  const t = useTranslations();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "m1",
       role: "assistant",
-      content:
-        "Hi! Upload a legal document and ask me anything. I'll summarize, flag risky clauses, and answer questions in simple language.",
+      content: t("chat.welcomeMessage"),
       timestamp: new Date(),
     },
   ]);
@@ -76,14 +91,16 @@ export const Dashboard = () => {
       filename: string;
       fileSize: number;
       pageCount?: number;
-      status: 'uploading' | 'processing' | 'completed' | 'failed';
+      status: "uploading" | "processing" | "completed" | "failed";
       error?: string;
       progress?: number;
       estimatedTime?: number;
       clauseCount?: number;
     };
   }>({});
-  const [autoDismissTimers, setAutoDismissTimers] = useState<{[key: string]: NodeJS.Timeout}>({});
+  const [autoDismissTimers, setAutoDismissTimers] = useState<{
+    [key: string]: NodeJS.Timeout;
+  }>({});
 
   const { toast } = useToast();
 
@@ -119,19 +136,20 @@ export const Dashboard = () => {
       // Basic client-side validation
       const basicValidation = validateFileBasics(file);
       if (!basicValidation.isValid) {
-        toast(createToast.error(
-          'Invalid File',
-          basicValidation.errors.join(' ')
-        ));
+        toast(
+          createToast.error("Invalid File", basicValidation.errors.join(" "))
+        );
         return;
       }
 
       // Show warnings if any
       if (basicValidation.warnings.length > 0) {
-        toast(createToast.warning(
-          'File Upload Warning',
-          basicValidation.warnings.join(' ')
-        ));
+        toast(
+          createToast.warning(
+            "File Upload Warning",
+            basicValidation.warnings.join(" ")
+          )
+        );
       }
 
       // Create upload card
@@ -140,7 +158,7 @@ export const Dashboard = () => {
         [cardId]: {
           filename: file.name,
           fileSize: file.size,
-          status: 'uploading',
+          status: "uploading",
           progress: 25,
         },
       }));
@@ -168,47 +186,52 @@ export const Dashboard = () => {
         ...prev,
         [cardId]: {
           ...prev[cardId],
-          status: 'processing',
+          status: "processing",
           progress: 75,
         },
       }));
 
-      toast(createToast.success(
-        'Upload Successful',
-        `${file.name} uploaded successfully and is being processed.`
-      ));
-
+      toast(
+        createToast.success(
+          "Upload Successful",
+          `${file.name} uploaded successfully and is being processed.`
+        )
+      );
     } catch (error: unknown) {
       console.error("Upload failed:", error);
 
       // Extract error details for better UX
       const errorResponse = (error as any)?.response;
-      const errorMessage = errorResponse?.data?.detail || 
-                          (error as Error)?.message || 
-                          'An unexpected error occurred while uploading your document.';
-      
-      const isValidationError = errorResponse?.status === 422 || errorResponse?.status === 413;
+      const errorMessage =
+        errorResponse?.data?.detail ||
+        (error as Error)?.message ||
+        "An unexpected error occurred while uploading your document.";
+
+      const isValidationError =
+        errorResponse?.status === 422 || errorResponse?.status === 413;
 
       // Update upload card to failed
       setUploadCards((prev) => ({
         ...prev,
         [cardId]: {
           ...prev[cardId],
-          status: 'failed',
+          status: "failed",
           error: errorMessage,
         },
       }));
 
-      toast(createToast.error(
-        isValidationError ? 'Document Validation Failed' : 'Upload Failed',
-        errorMessage,
-        {
-          action: {
-            label: 'Try Again',
-            onClick: () => handleFilesSelected(files),
-          },
-        }
-      ));
+      toast(
+        createToast.error(
+          isValidationError ? "Document Validation Failed" : "Upload Failed",
+          errorMessage,
+          {
+            action: {
+              label: "Try Again",
+              onClick: () => handleFilesSelected(files),
+            },
+          }
+        )
+      );
     }
   }
 
@@ -277,6 +300,9 @@ export const Dashboard = () => {
       // Format the response with sources
       const answerContent = response.answer;
       const sources = response.sources?.map((source) => ({
+        clause_id: source.clause_id,
+        clause_number: source.clause_number,
+        category: source.category,
         snippet: source.snippet,
         relevance_score: source.relevance_score,
       }));
@@ -370,15 +396,15 @@ export const Dashboard = () => {
       const updatedCards = { ...prev };
       Object.keys(updatedCards).forEach((cardId) => {
         const card = updatedCards[cardId];
-        if (card.status === 'processing') {
-          if (documentStatus.status === 'completed') {
+        if (card.status === "processing") {
+          if (documentStatus.status === "completed") {
             updatedCards[cardId] = {
               ...card,
-              status: 'completed',
+              status: "completed",
               progress: 100,
               clauseCount: documentStatus.clause_count || 0,
             };
-            
+
             // Start auto-dismiss timer for completed cards (5 seconds)
             const timerId = setTimeout(() => {
               setUploadCards((currentCards) => {
@@ -393,18 +419,17 @@ export const Dashboard = () => {
                 return restTimers;
               });
             }, 5000);
-            
+
             // Store the timer ID
             setAutoDismissTimers((timers) => ({
               ...timers,
               [cardId]: timerId,
             }));
-            
-          } else if (documentStatus.status === 'failed') {
+          } else if (documentStatus.status === "failed") {
             updatedCards[cardId] = {
               ...card,
-              status: 'failed',
-              error: 'Document processing failed on the server.',
+              status: "failed",
+              error: "Document processing failed on the server.",
             };
           }
         }
@@ -469,7 +494,7 @@ export const Dashboard = () => {
   useEffect(() => {
     return () => {
       // Clear all auto-dismiss timers on unmount to prevent memory leaks
-      Object.values(autoDismissTimers).forEach(timerId => {
+      Object.values(autoDismissTimers).forEach((timerId) => {
         clearTimeout(timerId);
       });
     };
@@ -494,27 +519,30 @@ export const Dashboard = () => {
         } md:flex w-80 shrink-0 flex-col border-r border-white/10 bg-[#111111] h-full overflow-hidden`}
       >
         <div className="p-4 flex flex-col gap-4 h-full overflow-hidden">
-          {/* Brand + Mobile toggle */}
+          {/* Brand + Language Selector + Mobile toggle */}
           <div className="flex items-center justify-between shrink-0">
             <div className="text-xl font-semibold bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
-              LegalEase AI
+              {t("app.title").split(" - ")[0]}
             </div>
-            <Button
-              className="md:hidden"
-              variant="ghost"
-              size="icon"
-              onClick={() => setSidebarOpen(false)}
-            >
-              <Menu className="h-5 w-5" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <LanguageSelector />
+              <Button
+                className="md:hidden"
+                variant="ghost"
+                size="icon"
+                onClick={() => setSidebarOpen(false)}
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+            </div>
           </div>
 
           <div className="flex gap-2 shrink-0">
             <Button className="flex-1" onClick={newChat}>
-              <Plus className="mr-2 h-4 w-4" /> New Chat
+              <Plus className="mr-2 h-4 w-4" /> {t("navigation.newChat")}
             </Button>
             <Button variant="secondary" onClick={handleUploadClick}>
-              <Upload className="mr-2 h-4 w-4" /> Upload
+              <Upload className="mr-2 h-4 w-4" /> {t("navigation.upload")}
             </Button>
             <input
               ref={fileInputRef}
@@ -646,7 +674,7 @@ export const Dashboard = () => {
                       return restTimers;
                     });
                   }
-                  
+
                   // Remove the card
                   setUploadCards((prev) => {
                     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -678,22 +706,26 @@ export const Dashboard = () => {
 
       {/* Mobile Overlay Background */}
       {rightPanelOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/50 z-20 xl:hidden"
           onClick={() => setRightPanelOpen(false)}
         />
       )}
 
       {/* Right Analysis Panel */}
-      <aside className={`
-        ${rightPanelOpen ? 'flex' : 'hidden'}
+      <aside
+        className={`
+        ${rightPanelOpen ? "flex" : "hidden"}
         xl:flex w-96 shrink-0 flex-col border-l border-white/10 bg-[#111111] h-full overflow-hidden
         fixed xl:relative top-0 right-0 z-30 xl:z-auto
-      `}>
+      `}
+      >
         <div className="p-4 flex flex-col h-full overflow-hidden">
           {/* Panel Header with Close Button */}
           <div className="flex items-center justify-between mb-4 xl:hidden">
-            <h2 className="text-lg font-semibold text-white">Document Analysis</h2>
+            <h2 className="text-lg font-semibold text-white">
+              Document Analysis
+            </h2>
             <Button
               variant="ghost"
               size="icon"
@@ -724,7 +756,7 @@ export const Dashboard = () => {
               <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-white/70">
                 <Flame className="h-4 w-4 text-red-500" /> Risk Analysis
               </h3>
-              
+
               <div className="space-y-4">
                 {/* Risk Heatmap */}
                 <RiskHeatmap
@@ -749,7 +781,8 @@ export const Dashboard = () => {
                       </div>
                     ) : clausesError ? (
                       <div className="text-xs text-red-400 p-3 rounded bg-red-500/10">
-                        Failed to load clause analysis. Please refresh or try again.
+                        Failed to load clause analysis. Please refresh or try
+                        again.
                       </div>
                     ) : topRiskyClauses.length > 0 ? (
                       topRiskyClauses.map((c, index) => (

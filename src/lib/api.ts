@@ -23,13 +23,16 @@ apiClient.interceptors.response.use(
     if (error.response) {
       const status = error.response.status;
       const data = error.response.data;
-      
+
       // Distinguish between validation errors and actual server errors
       if (status >= 400 && status < 500) {
         // Client errors (validation, authentication, etc.) - log as info/warning
         if (status === 422 || status === 413 || status === 400) {
           // Validation errors - these are expected user feedback, not application errors
-          console.info(`Validation Response [${status}]:`, data?.detail || data);
+          console.info(
+            `Validation Response [${status}]:`,
+            data?.detail || data
+          );
         } else if (status === 401 || status === 403) {
           // Authentication/authorization errors
           console.warn(`Auth Error [${status}]:`, data?.detail || data);
@@ -48,7 +51,7 @@ apiClient.interceptors.response.use(
       // Something else happened - actual error
       console.error("Request Setup Error:", error.message);
     }
-    
+
     // Still reject the promise so React Query can handle it properly
     return Promise.reject(error);
   }
@@ -133,6 +136,8 @@ export interface QuestionRequest {
 
 export interface SourceCitation {
   clause_id: string;
+  clause_number?: number;
+  category?: string;
   snippet: string;
   relevance_score: number;
 }
@@ -140,9 +145,11 @@ export interface SourceCitation {
 export interface AnswerResponse {
   answer: string;
   used_clause_ids: string[];
+  used_clause_numbers?: number[];
   confidence: number;
   sources: SourceCitation[];
   timestamp: string;
+  additional_insights?: string;
 }
 
 export interface QAHistoryItem {
