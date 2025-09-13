@@ -11,7 +11,7 @@
 !.yarn/versions
 
 # testing
-/coveragew
+/coverage
 
 # next.js
 /.next/
@@ -42,4 +42,4 @@ venv/
 *.tsbuildinfo
 next-env.d.ts
 
-*.json
+credentials.json

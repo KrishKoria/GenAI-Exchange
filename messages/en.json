@@ -1,0 +1,63 @@
+{
+  "app": {
+    "title": "LegalEase AI - Legal Document Analysis",
+    "description": "AI-powered legal document analysis with risk assessment and plain-language summaries"
+  },
+  "navigation": {
+    "newChat": "New Chat",
+    "upload": "Upload",
+    "uploadDocument": "Upload Document",
+    "selectFiles": "Select files"
+  },
+  "chat": {
+    "welcomeMessage": "Hi! Upload a legal document and ask me anything. I'll summarize, flag risky clauses, and answer questions in simple language.",
+    "placeholder": "Ask about clauses, risks, or request a plain-English summary…",
+    "welcomeTitle": "Welcome to LegalEase AI",
+    "send": "Send",
+    "processing": "Processing...",
+    "askQuestion": "Ask a question",
+    "documentProcessed": "Document processed successfully! Found {count} clauses. You can now ask questions about the document.",
+    "documentProcessingFailed": "Document processing failed. Please try uploading again or contact support if the issue persists.",
+    "uploadFailed": "Upload Failed",
+    "documentValidationFailed": "Document Validation Failed",
+    "retry": "Retry"
+  },
+  "analysis": {
+    "title": "Document Analysis",
+    "activeDocument": "Active Document",
+    "riskAnalysis": "Risk Analysis",
+    "highRiskClauses": "High-Risk Clauses ({count})",
+    "readabilityAnalysis": "Readability Analysis",
+    "uploadForAnalysis": "Upload a document to see risk analysis",
+    "documentComplexity": "Document complexity is above high school level"
+  },
+  "riskLevels": {
+    "low": "Low Risk",
+    "moderate": "Moderate Risk",
+    "attention": "High Risk",
+    "riskLevelsTitle": "Risk Levels"
+  },
+  "status": {
+    "uploaded": "Uploaded",
+    "processing": "Processing",
+    "completed": "Completed",
+    "failed": "Failed"
+  },
+  "validation": {
+    "fileRequired": "Please select a file to upload",
+    "fileSizeLimit": "File size must be less than 10MB",
+    "fileTypeInvalid": "Only PDF files are supported",
+    "processingError": "Document processing failed on the server"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "cancel": "Cancel",
+    "close": "Close",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "view": "View"
+  }
+}
