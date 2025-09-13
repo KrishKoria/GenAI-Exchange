@@ -131,6 +131,48 @@ function Test-CommandExists {
     }
 }
 
+function Test-PythonCommand {
+    <#
+    .SYNOPSIS
+        Tests for Python installation with fallback commands to handle Windows App Execution Aliases
+
+    .DESCRIPTION
+        On Windows 11, 'python' command may redirect to Microsoft Store installer.
+        This function tries multiple Python commands in order of preference:
+        1. python (if it actually works and returns version)
+        2. py (Python Launcher for Windows)
+        3. python3 (common on some installations)
+
+    .OUTPUTS
+        Returns hashtable with WorkingCommand and Version, or $null if none work
+    #>
+
+    $pythonCommands = @("python", "py", "python3")
+
+    foreach ($cmd in $pythonCommands) {
+        if (Test-CommandExists $cmd) {
+            try {
+                # Try to get version - this will fail if it's the Store redirect
+                $versionOutput = & $cmd --version 2>$null
+                if ($LASTEXITCODE -eq 0 -and $versionOutput -and $versionOutput -match "Python\s+(\d+\.\d+\.\d+)") {
+                    $version = $Matches[1]
+                    Write-Status "Found working Python command: $cmd (version $version)" "Success"
+                    return @{
+                        WorkingCommand = $cmd
+                        Version = $version
+                        FullOutput = $versionOutput
+                    }
+                }
+            } catch {
+                # Command exists but failed to execute properly (likely Store redirect)
+                Write-Status "Command '$cmd' exists but failed to execute: $($_.Exception.Message)" "Warning"
+            }
+        }
+    }
+
+    return $null
+}
+
 function Compare-Version {
     param(
         [string]$Version1,
@@ -438,17 +480,18 @@ function Install-NodeJS {
 
 function Install-Python {
     Write-Status "Checking Python installation..." "Info"
-    
-    if (Test-CommandExists "python") {
-        $currentVersion = & python --version 2>$null
-        $currentVersion = ($currentVersion -split '\s+')[1]
-        
-        if (Compare-Version $currentVersion $RequiredVersions.Python) {
-            Write-Status "Python $currentVersion is already installed (required: $($RequiredVersions.Python)+)" "Success"
+
+    # Use enhanced Python detection to handle Windows App Execution Aliases
+    $pythonInfo = Test-PythonCommand
+    if ($pythonInfo) {
+        if (Compare-Version $pythonInfo.Version $RequiredVersions.Python) {
+            Write-Status "Python $($pythonInfo.Version) is already installed via '$($pythonInfo.WorkingCommand)' (required: $($RequiredVersions.Python)+)" "Success"
             return $true
         } else {
-            Write-Status "Python $currentVersion is outdated (required: $($RequiredVersions.Python)+)" "Warning"
+            Write-Status "Python $($pythonInfo.Version) via '$($pythonInfo.WorkingCommand)' is outdated (required: $($RequiredVersions.Python)+)" "Warning"
         }
+    } else {
+        Write-Status "Python not found or not working properly" "Warning"
     }
     
     Write-Status "Installing Python 3.12..." "Info"
@@ -459,13 +502,14 @@ function Install-Python {
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
         
         Start-Sleep -Seconds 5
-        
-        if (Test-CommandExists "python") {
-            $installedVersion = & python --version 2>$null
-            Write-Status "$installedVersion installed successfully" "Success"
+
+        # Verify installation using enhanced Python detection
+        $pythonInfo = Test-PythonCommand
+        if ($pythonInfo) {
+            Write-Status "Python $($pythonInfo.Version) installed successfully via '$($pythonInfo.WorkingCommand)'" "Success"
             return $true
         } else {
-            throw "Python installation verification failed"
+            throw "Python installation verification failed - no working Python command found"
         }
     } catch {
         Write-Status "Failed to install Python: $($_.Exception.Message)" "Error"
@@ -499,10 +543,16 @@ function Install-Poetry {
         try {
             # Configure pip trusted hosts
             $trustedHosts = Set-PipTrustedHosts
-            
+
+            # Get working Python command
+            $pythonInfo = Test-PythonCommand
+            if (-not $pythonInfo) {
+                throw "No working Python command found for Poetry installation"
+            }
+
             # Build pip install command with trusted hosts
             $trustedHostArgs = ($trustedHosts | ForEach-Object { "--trusted-host $_" }) -join " "
-            $pipCommand = "python -m pip install poetry $trustedHostArgs --user --upgrade"
+            $pipCommand = "$($pythonInfo.WorkingCommand) -m pip install poetry $trustedHostArgs --user --upgrade"
             
             Write-Status "Running: $pipCommand" "Info"
             Invoke-Expression $pipCommand
@@ -559,7 +609,12 @@ function Install-Poetry {
         $installerContent = Invoke-WebRequestWithFallback -Uri "https://install.python-poetry.org"
         
         if ($installerContent) {
-            $installerContent.Content | python -
+            # Get working Python command for official installer
+            $pythonInfo = Test-PythonCommand
+            if (-not $pythonInfo) {
+                throw "No working Python command found for Poetry installation"
+            }
+            $installerContent.Content | & $pythonInfo.WorkingCommand -
             
             # Add Poetry to PATH
             $poetryPath = "$env:USERPROFILE\.local\bin"
@@ -585,8 +640,14 @@ function Install-Poetry {
     Write-Status "Attempting Poetry installation with relaxed SSL settings (last resort)..." "Warning"
     try {
         Set-SSLSecuritySettings -Disable
-        
-        $pipCommand = "python -m pip install poetry --user --upgrade --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org"
+
+        # Get working Python command for final attempt
+        $pythonInfo = Test-PythonCommand
+        if (-not $pythonInfo) {
+            throw "No working Python command found for Poetry installation"
+        }
+
+        $pipCommand = "$($pythonInfo.WorkingCommand) -m pip install poetry --user --upgrade --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org"
         Write-Status "Running: $pipCommand" "Info"
         Invoke-Expression $pipCommand
         
@@ -618,7 +679,10 @@ function Install-Poetry {
     Write-Status "All Poetry installation methods failed!" "Error"
     Write-Status "Please try installing Poetry manually:" "Info"
     Write-Status "1. Open PowerShell as Administrator" "Info"
-    Write-Status "2. Run: python -m pip install poetry --user --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org" "Info"
+    Write-Status "2. Try one of these commands (use whichever Python command works):" "Info"
+    Write-Status "   python -m pip install poetry --user --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org" "Info"
+    Write-Status "   py -m pip install poetry --user --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org" "Info"
+    Write-Status "   python3 -m pip install poetry --user --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org" "Info"
     Write-Status "3. Add %USERPROFILE%\.local\bin to your PATH environment variable" "Info"
     
     return $false
@@ -1061,19 +1125,31 @@ function Test-ProjectSetup {
     )
     
     foreach ($tool in $tools) {
-        if (Test-CommandExists $tool.Command) {
-            try {
-                $version = & $tool.Command $tool.VersionArg 2>$null | Select-Object -First 1
-                Write-Status "✓ $($tool.Name): $version" "Success"
-            } catch {
-                Write-Status "✓ $($tool.Name): Available" "Success"
+        # Special handling for Python to deal with Windows App Execution Aliases
+        if ($tool.Name -eq "Python") {
+            $pythonInfo = Test-PythonCommand
+            if ($pythonInfo) {
+                Write-Status "✓ $($tool.Name): $($pythonInfo.Version) via '$($pythonInfo.WorkingCommand)'" "Success"
+            } else {
+                Write-Status "✗ $($tool.Name): Not found or not working" "Error"
+                $allPassed = $false
             }
         } else {
-            if ($tool.Required) {
-                Write-Status "✗ $($tool.Name): Not found" "Error"
-                $allPassed = $false
+            # Standard tool verification for non-Python tools
+            if (Test-CommandExists $tool.Command) {
+                try {
+                    $version = & $tool.Command $tool.VersionArg 2>$null | Select-Object -First 1
+                    Write-Status "✓ $($tool.Name): $version" "Success"
+                } catch {
+                    Write-Status "✓ $($tool.Name): Available" "Success"
+                }
             } else {
-                Write-Status "? $($tool.Name): Not found (optional)" "Warning"
+                if ($tool.Required) {
+                    Write-Status "✗ $($tool.Name): Not found" "Error"
+                    $allPassed = $false
+                } else {
+                    Write-Status "? $($tool.Name): Not found (optional)" "Warning"
+                }
             }
         }
     }
