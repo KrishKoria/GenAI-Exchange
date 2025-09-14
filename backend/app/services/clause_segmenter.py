@@ -5,10 +5,8 @@ import logging
 import re
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
-import numpy as np
 
 from app.core.logging import get_logger, LogContext
-from app.services.embeddings_service import EmbeddingsService
 
 logger = get_logger(__name__)
 
@@ -32,14 +30,6 @@ class ClauseSegmenter:
     """Service for segmenting legal documents into individual clauses."""
     
     def __init__(self):
-        # Initialize embeddings service for semantic similarity fallback
-        try:
-            self.embeddings_service = EmbeddingsService()
-            self.semantic_enabled = True
-        except Exception as e:
-            logger.warning(f"Failed to initialize embeddings service: {e}")
-            self.embeddings_service = None
-            self.semantic_enabled = False
 
         # Common legal document heading patterns
         self.heading_patterns = [
@@ -68,90 +58,6 @@ class ClauseSegmenter:
             'breach', 'notice', 'jurisdiction', 'venue', 'arbitration'
         }
 
-        # Representative example clauses for semantic similarity matching
-        self.category_examples = {
-            "Termination": [
-                "This Agreement shall terminate immediately upon material breach.",
-                "Either party may terminate this Agreement with thirty (30) days written notice.",
-                "This Agreement expires on December 31, 2025 unless renewed.",
-                "Upon termination, all obligations and rights shall cease."
-            ],
-            "Liability": [
-                "Company shall not be liable for any indirect or consequential damages.",
-                "Customer's liability for damages shall be limited to the amount paid.",
-                "Each party shall be responsible for their own negligent acts.",
-                "Liability is limited to direct damages not exceeding the contract value."
-            ],
-            "Indemnity": [
-                "Company shall indemnify Customer against third-party claims.",
-                "Each party agrees to hold the other harmless from any losses.",
-                "Contractor shall defend against all intellectual property claims.",
-                "Indemnification includes attorney fees and court costs."
-            ],
-            "Confidentiality": [
-                "All confidential information must remain private and secure.",
-                "Neither party shall disclose proprietary information to third parties.",
-                "This non-disclosure agreement covers all trade secrets.",
-                "Confidential information survives termination for five years."
-            ],
-            "Payment": [
-                "Payment is due within thirty (30) days of invoice receipt.",
-                "All fees are non-refundable and payable in advance.",
-                "Late payments incur interest at 1.5% per month.",
-                "Expenses shall be reimbursed upon submission of receipts."
-            ],
-            "IP Ownership": [
-                "All work product shall be owned exclusively by Company.",
-                "Customer retains all rights to their existing intellectual property.",
-                "Contractor assigns all invention rights to Company.",
-                "Copyrights in deliverables vest immediately in Client."
-            ],
-            "Dispute Resolution": [
-                "Any disputes shall be resolved through binding arbitration.",
-                "Parties agree to mediate before pursuing litigation.",
-                "All claims must be filed in the courts of California.",
-                "Disputes shall be resolved through good faith negotiation first."
-            ],
-            "Governing Law": [
-                "This Agreement is governed by California law.",
-                "The laws of New York shall apply to this contract.",
-                "Jurisdiction is exclusively in Delaware courts.",
-                "This Agreement is construed under federal law."
-            ],
-            "Assignment": [
-                "This Agreement may not be assigned without written consent.",
-                "Rights and obligations may be transferred with approval.",
-                "No delegation of duties is permitted without permission.",
-                "Assignment binds successors and assigns."
-            ],
-            "Modification": [
-                "This Agreement may only be modified in writing.",
-                "No oral amendments or changes are permitted.",
-                "Changes require signed agreement by both parties.",
-                "Waivers must be in writing to be effective."
-            ],
-            "Warranties": [
-                "Company warrants the software will perform as described.",
-                "All services are provided 'as is' without warranty.",
-                "Contractor guarantees workmanship for twelve months.",
-                "Products are warranted against defects in materials."
-            ],
-            "Force Majeure": [
-                "Performance is excused due to acts of God.",
-                "Delays caused by uncontrollable circumstances are excused.",
-                "Force majeure includes natural disasters and government action.",
-                "Performance may be suspended during force majeure events."
-            ],
-            "Definitions": [
-                "Confidential Information means all non-public technical data.",
-                "Services shall include all activities described in Exhibit A.",
-                "Effective Date means the date this Agreement is signed.",
-                "Intellectual Property includes all copyrights and patents."
-            ]
-        }
-
-        # Cache for embeddings to avoid recomputation
-        self._category_embeddings = None
     
     async def segment_document(
         self, 
@@ -751,146 +657,9 @@ class ClauseSegmenter:
                 if confidence >= confidence_threshold and best_score >= evidence_threshold:
                     clause.category = best_category
                 else:
-                    # Try semantic similarity fallback for low confidence cases
-                    if self.semantic_enabled and confidence < 0.3:
-                        semantic_category = await self._classify_by_semantic_similarity(clause.text)
-                        if semantic_category and semantic_category != "Other":
-                            clause.category = semantic_category
-                        else:
-                            clause.category = "Other"
-                    else:
-                        clause.category = "Other"
-            else:
-                # Try semantic similarity fallback if no patterns matched
-                if self.semantic_enabled:
-                    semantic_category = await self._classify_by_semantic_similarity(clause.text)
-                    clause.category = semantic_category if semantic_category else "Other"
-                else:
                     clause.category = "Other"
+            else:
+                clause.category = "Other"
 
         return clauses
 
-    async def _get_category_embeddings(self) -> Dict[str, List[List[float]]]:
-        """
-        Get or generate embeddings for all category examples.
-
-        Returns:
-            Dictionary mapping categories to lists of embeddings for their examples
-        """
-        if self._category_embeddings is not None:
-            return self._category_embeddings
-
-        if not self.semantic_enabled:
-            return {}
-
-        category_embeddings = {}
-
-        for category, examples in self.category_examples.items():
-            try:
-                # Generate embeddings for all examples in this category
-                embeddings = await self.embeddings_service.generate_embeddings_batch(examples)
-                if embeddings and all(emb is not None for emb in embeddings):
-                    category_embeddings[category] = embeddings
-                else:
-                    logger.warning(f"Failed to generate embeddings for category {category}")
-
-            except Exception as e:
-                logger.error(f"Error generating embeddings for category {category}: {e}")
-
-        self._category_embeddings = category_embeddings
-        return category_embeddings
-
-    async def _classify_by_semantic_similarity(self, clause_text: str) -> Optional[str]:
-        """
-        Classify clause using semantic similarity to category examples.
-
-        Args:
-            clause_text: The clause text to classify
-
-        Returns:
-            Best matching category or None if no good match
-        """
-        if not self.semantic_enabled or not clause_text.strip():
-            return None
-
-        try:
-            # Generate embedding for the input clause
-            clause_embeddings = await self.embeddings_service.generate_embeddings_batch([clause_text])
-            if not clause_embeddings or clause_embeddings[0] is None:
-                logger.warning("Failed to generate embedding for clause text")
-                return None
-
-            clause_embedding = clause_embeddings[0]
-
-            # Get category embeddings
-            category_embeddings = await self._get_category_embeddings()
-            if not category_embeddings:
-                logger.warning("No category embeddings available")
-                return None
-
-            # Calculate similarities for each category
-            best_category = None
-            best_similarity = 0.0
-
-            for category, example_embeddings in category_embeddings.items():
-                # Calculate average similarity to all examples in this category
-                similarities = []
-
-                for example_embedding in example_embeddings:
-                    similarity = self._cosine_similarity(clause_embedding, example_embedding)
-                    similarities.append(similarity)
-
-                if similarities:
-                    # Use maximum similarity (best match) rather than average
-                    max_similarity = max(similarities)
-
-                    if max_similarity > best_similarity:
-                        best_similarity = max_similarity
-                        best_category = category
-
-            # Apply semantic similarity threshold
-            semantic_threshold = 0.7  # Require 70% similarity for semantic match
-
-            if best_similarity >= semantic_threshold:
-                logger.debug(f"Semantic classification: '{clause_text[:100]}...' -> {best_category} (similarity: {best_similarity:.3f})")
-                return best_category
-            else:
-                logger.debug(f"No semantic match found for clause (best: {best_similarity:.3f}, threshold: {semantic_threshold})")
-                return None
-
-        except Exception as e:
-            logger.error(f"Error in semantic classification: {e}")
-            return None
-
-    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """
-        Calculate cosine similarity between two vectors.
-
-        Args:
-            vec1: First vector
-            vec2: Second vector
-
-        Returns:
-            Cosine similarity score between 0 and 1
-        """
-        try:
-            # Convert to numpy arrays for easier calculation
-            a = np.array(vec1)
-            b = np.array(vec2)
-
-            # Calculate cosine similarity
-            dot_product = np.dot(a, b)
-            norm_a = np.linalg.norm(a)
-            norm_b = np.linalg.norm(b)
-
-            if norm_a == 0 or norm_b == 0:
-                return 0.0
-
-            similarity = dot_product / (norm_a * norm_b)
-
-            # Ensure result is between 0 and 1
-            return max(0.0, min(1.0, similarity))
-
-        except Exception as e:
-            logger.error(f"Error calculating cosine similarity: {e}")
-            return 0.0

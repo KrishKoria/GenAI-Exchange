@@ -430,6 +430,17 @@ export const Dashboard = () => {
   }
 
   async function sendMessage(content: string) {
+    // Create user message immediately for optimistic UI
+    const userMsg: ChatMessage = {
+      id: `u-${Date.now()}`,
+      role: "user",
+      content,
+      timestamp: new Date(),
+    };
+
+    // Add user message immediately (optimistic update)
+    setMessages((prev) => [...prev, userMsg]);
+
     // Check if we have a document selected
     if (!currentDocId) {
       const errorMsg: ChatMessage = {
@@ -443,53 +454,49 @@ export const Dashboard = () => {
       return;
     }
 
-    // Create chat session if we don't have one
-    let sessionId = currentChatSessionId;
-    if (!sessionId) {
-      try {
-        const newSession = await createChatSessionMutation.mutateAsync({
-          selected_document_ids:
-            selectedDocs.length > 0 ? selectedDocs : [currentDocId],
-        });
-        sessionId = newSession.session_id;
-        setCurrentChatSessionId(sessionId);
-      } catch (error) {
-        console.error("Failed to create chat session:", error);
-        // Continue without chat session for fallback
-      }
-    }
-
-    // Update document context if needed
-    if (sessionId && selectedDocs.length > 0) {
-      try {
-        await updateDocumentContextMutation.mutateAsync({
-          sessionId,
-          docIds: selectedDocs,
-        });
-      } catch (error) {
-        console.error("Failed to update document context:", error);
-        // Continue anyway
-      }
-    }
-
-    const userMsg: ChatMessage = {
-      id: `u-${Date.now()}`,
-      role: "user",
-      content,
-      timestamp: new Date(),
-    };
+    // Create loading message for assistant response
     const loadingMsg: ChatMessage = {
       id: `loading-${Date.now()}`,
       role: "assistant",
-      content: "Analyzing your question and searching through the document...",
+      content:
+        "✨ Analyzing your question and searching through the document...",
       isLoading: true,
       timestamp: new Date(),
     };
 
-    // Immediate optimistic render
-    setMessages((prev) => [...prev, userMsg, loadingMsg]);
+    // Add loading message
+    setMessages((prev) => [...prev, loadingMsg]);
 
     try {
+      // Create chat session if we don't have one (async, non-blocking)
+      let sessionId = currentChatSessionId;
+      if (!sessionId) {
+        try {
+          const newSession = await createChatSessionMutation.mutateAsync({
+            selected_document_ids:
+              selectedDocs.length > 0 ? selectedDocs : [currentDocId],
+          });
+          sessionId = newSession.session_id;
+          setCurrentChatSessionId(sessionId);
+        } catch (error) {
+          console.error("Failed to create chat session:", error);
+          // Continue without chat session for fallback
+        }
+      }
+
+      // Update document context if needed (async, non-blocking)
+      if (sessionId && selectedDocs.length > 0) {
+        try {
+          await updateDocumentContextMutation.mutateAsync({
+            sessionId,
+            docIds: selectedDocs,
+          });
+        } catch (error) {
+          console.error("Failed to update document context:", error);
+          // Continue anyway
+        }
+      }
+
       // Ask the question using the chat-aware API
       const response = await askQuestionMutation.mutateAsync({
         doc_id: currentDocId,
@@ -527,10 +534,10 @@ export const Dashboard = () => {
       const errorMsg: ChatMessage = {
         id: `error-${Date.now()}`,
         role: "assistant",
-        content: `Sorry, I couldn't process your question: ${
+        content: `❌ Sorry, I couldn't process your question: ${
           (error as any)?.response?.data?.detail ||
           (error as Error)?.message ||
-          "Unknown error"
+          "Network error. Please check your connection and try again."
         }`,
         error: true,
         timestamp: new Date(),
