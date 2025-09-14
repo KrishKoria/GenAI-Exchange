@@ -29,7 +29,6 @@ import { UploadSuccessCard } from "@/components/UploadSuccessCard";
 import { ReadabilityPanel } from "@/components/ReadabilityPanel";
 import { LanguageSelector } from "@/components/LanguageSelector";
 import { useTranslations } from "next-intl";
-// Simple client-side file validation helpers
 const validateFileBasics = (file: File) => {
   const errors: string[] = [];
   const warnings: string[] = [];

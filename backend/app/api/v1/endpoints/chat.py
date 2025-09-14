@@ -21,15 +21,20 @@ from app.models.chat import (
     AddMessageResponse,
     ChatQuestionRequest,
     ChatAnswerResponse,
-    SessionSummaryRequest,
-    SessionSummaryResponse,
-    ChatSession,
     MessageRole
 )
 from app.services.chat_session_service import ChatSessionService
 from app.services.firestore_client import FirestoreClient, FirestoreError
 from app.services.embeddings_service import EmbeddingsService, EmbeddingsError
 from app.services.gemini_client import GeminiClient, GeminiError
+from app.dependencies.services import (
+    get_chat_session_service,
+    get_firestore_client,
+    get_embeddings_service,
+    get_gemini_client,
+    get_cache_service
+)
+from app.services.cache_service import InMemoryCache
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -38,7 +43,8 @@ logger = logging.getLogger(__name__)
 @router.post("/sessions", response_model=CreateChatSessionResponse)
 async def create_chat_session(
     request: CreateChatSessionRequest,
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    chat_service: ChatSessionService = Depends(get_chat_session_service)
 ) -> CreateChatSessionResponse:
     """
     Create a new chat session with optional document context.
@@ -53,8 +59,6 @@ async def create_chat_session(
         HTTPException: If session creation fails
     """
     try:
-        chat_service = ChatSessionService()
-        
         session, selected_documents = await chat_service.create_session(request)
         
         logger.info(f"Created chat session: {session.session_id}")
@@ -79,7 +83,8 @@ async def list_chat_sessions(
     user_id: Optional[str] = Query(None, description="User ID to filter sessions"),
     limit: int = Query(50, ge=1, le=100, description="Maximum number of sessions to return"),
     include_archived: bool = Query(False, description="Include archived sessions"),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    chat_service: ChatSessionService = Depends(get_chat_session_service)
 ) -> ChatSessionListResponse:
     """
     List chat sessions for a user.
@@ -93,8 +98,6 @@ async def list_chat_sessions(
         List of chat sessions
     """
     try:
-        chat_service = ChatSessionService()
-        
         sessions = await chat_service.list_sessions(
             user_id=user_id,
             limit=limit,
@@ -117,7 +120,8 @@ async def list_chat_sessions(
 @router.get("/sessions/{session_id}", response_model=ChatSessionResponse)
 async def get_chat_session(
     session_id: str,
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    chat_service: ChatSessionService = Depends(get_chat_session_service)
 ) -> ChatSessionResponse:
     """
     Retrieve a chat session with full conversation history.
@@ -132,8 +136,6 @@ async def get_chat_session(
         HTTPException: If session not found
     """
     try:
-        chat_service = ChatSessionService()
-        
         session = await chat_service.get_session(session_id)
         
         if not session:
@@ -155,7 +157,8 @@ async def get_chat_session(
 async def update_session_documents(
     session_id: str,
     request: UpdateSessionDocumentsRequest,
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    chat_service: ChatSessionService = Depends(get_chat_session_service)
 ) -> UpdateSessionDocumentsResponse:
     """
     Update the document context for a chat session.
@@ -171,8 +174,6 @@ async def update_session_documents(
         HTTPException: If session not found or update fails
     """
     try:
-        chat_service = ChatSessionService()
-        
         selected_documents = await chat_service.update_session_documents(
             session_id, request
         )
@@ -195,7 +196,8 @@ async def update_session_documents(
 async def add_message_to_session(
     session_id: str,
     request: AddMessageRequest,
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    chat_service: ChatSessionService = Depends(get_chat_session_service)
 ) -> AddMessageResponse:
     """
     Add a message to a chat session.
@@ -211,8 +213,6 @@ async def add_message_to_session(
         HTTPException: If session not found or message addition fails
     """
     try:
-        chat_service = ChatSessionService()
-        
         message = await chat_service.add_message(session_id, request)
         
         return AddMessageResponse(
@@ -233,7 +233,12 @@ async def add_message_to_session(
 async def ask_question_with_memory(
     session_id: str,
     request: ChatQuestionRequest,
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    chat_service: ChatSessionService = Depends(get_chat_session_service),
+    firestore_client: FirestoreClient = Depends(get_firestore_client),
+    embeddings_service: EmbeddingsService = Depends(get_embeddings_service),
+    gemini_client: GeminiClient = Depends(get_gemini_client),
+    cache_service: InMemoryCache = Depends(get_cache_service)
 ) -> ChatAnswerResponse:
     """
     Ask a question with chat session memory and document context.
@@ -252,12 +257,6 @@ async def ask_question_with_memory(
         raise HTTPException(status_code=400, detail="Question cannot be empty")
     
     try:
-        # Initialize services
-        chat_service = ChatSessionService()
-        firestore_client = FirestoreClient()
-        embeddings_service = EmbeddingsService()
-        gemini_client = GeminiClient()
-        
         # 1. Get session and verify it exists
         session = await chat_service.get_session(session_id)
         if not session:
@@ -435,7 +434,8 @@ async def ask_question_with_memory(
 @router.delete("/sessions/{session_id}")
 async def delete_chat_session(
     session_id: str,
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    chat_service: ChatSessionService = Depends(get_chat_session_service)
 ) -> JSONResponse:
     """
     Delete a chat session and all its messages.
@@ -450,8 +450,6 @@ async def delete_chat_session(
         HTTPException: If deletion fails
     """
     try:
-        chat_service = ChatSessionService()
-        
         success = await chat_service.delete_session(session_id)
         
         if not success:
@@ -472,7 +470,8 @@ async def delete_chat_session(
 @router.put("/sessions/{session_id}/archive")
 async def archive_chat_session(
     session_id: str,
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    chat_service: ChatSessionService = Depends(get_chat_session_service)
 ) -> JSONResponse:
     """
     Archive a chat session (soft delete).
@@ -484,8 +483,6 @@ async def archive_chat_session(
         Success confirmation
     """
     try:
-        chat_service = ChatSessionService()
-        
         success = await chat_service.archive_session(session_id)
         
         if not success:

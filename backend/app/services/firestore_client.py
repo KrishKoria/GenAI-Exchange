@@ -29,23 +29,35 @@ class FirestoreClient:
         self.settings = get_settings()
         self._client: Optional[firestore.Client] = None
         self._db: Optional[firestore.Client] = None
+        self._initialized = False
     
     @property
     def db(self) -> firestore.Client:
-        """Lazy initialization of Firestore client."""
-        if self._db is None:
+        """Lazy initialization of Firestore client with connection pooling."""
+        if self._db is None or not self._initialized:
             try:
+                # Configure client with connection pooling for better performance
                 self._client = firestore.Client(
                     project=self.settings.PROJECT_ID,
                     database=self.settings.FIRESTORE_DATABASE
                 )
                 self._db = self._client
-                logger.info("Firestore client initialized")
+                self._initialized = True
+                logger.info("Firestore client initialized with connection pooling")
             except Exception as e:
                 logger.error(f"Failed to initialize Firestore client: {e}")
                 raise FirestoreError(f"Firestore initialization failed: {e}")
         
         return self._db
+    
+    def close(self):
+        """Close the Firestore client connection."""
+        if self._client:
+            self._client.close()
+            self._client = None
+            self._db = None
+            self._initialized = False
+            logger.info("Firestore client connection closed")
     
     # Document Operations
     

@@ -5,8 +5,11 @@ import logging
 from typing import Dict, Any, List
 from uuid import uuid4
 from datetime import datetime
+import json
+import hashlib
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from google.cloud.firestore import SERVER_TIMESTAMP
 
 from app.core.config import Settings, get_settings
@@ -16,6 +19,14 @@ from app.services.firestore_client import FirestoreClient, FirestoreError
 from app.services.embeddings_service import EmbeddingsService, EmbeddingsError
 from app.services.gemini_client import GeminiClient, GeminiError
 from app.services.chat_session_service import ChatSessionService
+from app.dependencies.services import (
+    get_firestore_client,
+    get_embeddings_service,
+    get_gemini_client,
+    get_chat_session_service,
+    get_cache_service
+)
+from app.services.cache_service import CacheKeys, InMemoryCache
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -24,7 +35,13 @@ logger = logging.getLogger(__name__)
 @router.post("/ask", response_model=AnswerResponse)
 async def ask_question(
     request: QuestionRequest,
-    settings: Settings = Depends(get_settings)
+    background_tasks: BackgroundTasks,
+    settings: Settings = Depends(get_settings),
+    firestore_client: FirestoreClient = Depends(get_firestore_client),
+    embeddings_service: EmbeddingsService = Depends(get_embeddings_service),
+    gemini_client: GeminiClient = Depends(get_gemini_client),
+    chat_session_service: ChatSessionService = Depends(get_chat_session_service),
+    cache_service: InMemoryCache = Depends(get_cache_service)
 ) -> AnswerResponse:
     """
     Ask a question about document clauses using vector similarity search and grounded prompting.
@@ -45,21 +62,14 @@ async def ask_question(
         raise HTTPException(status_code=400, detail="Question cannot be empty")
     
     try:
-        # Initialize services
-        firestore_client = FirestoreClient()
-        embeddings_service = EmbeddingsService()
-        gemini_client = GeminiClient()
-        
         # Check if this is a chat session-based request
         conversation_context = ""
         conversation_context_used = False
         chat_session_id = None
         
         if request.chat_session_id and request.use_conversation_memory:
-            chat_service = ChatSessionService()
-            
             # Get conversation context from chat session
-            conversation_history, context_summary = await chat_service.get_conversation_context(
+            conversation_history, context_summary = await chat_session_service.get_conversation_context(
                 request.chat_session_id,
                 max_messages=10
             )
@@ -76,8 +86,9 @@ async def ask_question(
             conversation_context_used = len(conversation_history) > 0 or bool(context_summary)
             chat_session_id = request.chat_session_id
             
-            # Add user message to chat session
-            await chat_service.add_message(
+            # Add user message to chat session - moved to background task
+            background_tasks.add_task(
+                chat_session_service.add_message,
                 request.chat_session_id,
                 AddMessageRequest(
                     role=MessageRole.USER,
@@ -86,9 +97,24 @@ async def ask_question(
                 )
             )
         
-        # 1. Verify document exists and get its clauses
+        # 1. Verify document exists and get its clauses (with caching)
         logger.info(f"Fetching clauses for document: {request.doc_id}")
-        clauses = await firestore_client.get_document_clauses(request.doc_id)
+        
+        # Check cache first
+        cache_key = CacheKeys.document_clauses(request.doc_id)
+        clauses = await cache_service.get(cache_key)
+        
+        if clauses is None:
+            # Cache miss - fetch from Firestore
+            logger.info(f"Cache miss for document clauses: {request.doc_id}")
+            clauses = await firestore_client.get_document_clauses(request.doc_id)
+            
+            # Cache the result for future requests (cache for 30 minutes)
+            if clauses:
+                await cache_service.set(cache_key, clauses, ttl=1800)
+                logger.info(f"Cached {len(clauses)} clauses for document: {request.doc_id}")
+        else:
+            logger.info(f"Cache hit for document clauses: {request.doc_id} ({len(clauses)} clauses)")
         
         if not clauses:
             raise HTTPException(
@@ -156,10 +182,10 @@ async def ask_question(
             # No relevant clauses found, return informative response
             answer_text = "I couldn't find any clauses in this document that relate to your question. Please try rephrasing your question or ask about different aspects of the document."
             
-            # Add to chat session if applicable
+            # Add to chat session if applicable (background task)
             if chat_session_id:
-                chat_service = ChatSessionService()
-                await chat_service.add_message(
+                background_tasks.add_task(
+                    chat_session_service.add_message,
                     chat_session_id,
                     AddMessageRequest(
                         role=MessageRole.ASSISTANT,
@@ -193,15 +219,7 @@ async def ask_question(
             doc_id=request.doc_id
         )
         
-        # 5. Store Q&A in history (enhanced with chat context)
-        await _store_qa_history(
-            firestore_client,
-            request,
-            qa_result,
-            relevant_clauses
-        )
-        
-        # 6. Build response with proper source citations
+        # 5. Build response with proper source citations
         sources = []
         for clause in relevant_clauses:
             if clause.get("clause_id") in qa_result.get("used_clause_ids", []):
@@ -217,10 +235,20 @@ async def ask_question(
                     relevance_score=clause.get("similarity", 0.0)  # Use 'similarity' not 'similarity_score'
                 ))
         
-        # 7. Add assistant message to chat session if applicable
+        # 6. Move background operations to background tasks for better performance
+        # Store Q&A in history (background task)
+        background_tasks.add_task(
+            _store_qa_history,
+            firestore_client,
+            request,
+            qa_result,
+            relevant_clauses
+        )
+        
+        # 7. Add assistant message to chat session (background task)
         if chat_session_id:
-            chat_service = ChatSessionService()
-            await chat_service.add_message(
+            background_tasks.add_task(
+                chat_session_service.add_message,
                 chat_session_id,
                 AddMessageRequest(
                     role=MessageRole.ASSISTANT,
@@ -253,6 +281,197 @@ async def ask_question(
     except Exception as e:
         logger.error(f"Unexpected error in Q&A: {e}")
         raise HTTPException(status_code=500, detail="Internal server error processing question")
+
+
+@router.post("/ask-stream")
+async def ask_question_stream(
+    request: QuestionRequest,
+    background_tasks: BackgroundTasks,
+    settings: Settings = Depends(get_settings),
+    firestore_client: FirestoreClient = Depends(get_firestore_client),
+    embeddings_service: EmbeddingsService = Depends(get_embeddings_service),
+    gemini_client: GeminiClient = Depends(get_gemini_client),
+    chat_session_service: ChatSessionService = Depends(get_chat_session_service),
+    cache_service: InMemoryCache = Depends(get_cache_service)
+):
+    """
+    Streaming version of ask_question that provides real-time updates.
+    Returns Server-Sent Events (SSE) stream.
+    """
+    async def event_stream():
+        try:
+            # Send initial status
+            yield f"data: {json.dumps({'type': 'status', 'message': 'Processing your question...'})}\n\n"
+            
+            # Same logic as ask_question but with streaming updates
+            if not request.question.strip():
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Question cannot be empty'})}\n\n"
+                return
+            
+            # Add user message to chat session immediately (background task)
+            conversation_context = ""
+            conversation_context_used = False
+            chat_session_id = None
+            
+            if request.chat_session_id and request.use_conversation_memory:
+                chat_session_id = request.chat_session_id
+                
+                # Send user message event immediately
+                yield f"data: {json.dumps({'type': 'user_message', 'content': request.question, 'chat_session_id': chat_session_id})}\n\n"
+                
+                # Add user message in background
+                background_tasks.add_task(
+                    chat_session_service.add_message,
+                    request.chat_session_id,
+                    AddMessageRequest(
+                        role=MessageRole.USER,
+                        content=request.question,
+                        metadata={"doc_id": request.doc_id, "legacy_qa": True}
+                    )
+                )
+                
+                # Get conversation context
+                yield f"data: {json.dumps({'type': 'status', 'message': 'Loading conversation context...'})}\n\n"
+                conversation_history, context_summary = await chat_session_service.get_conversation_context(
+                    request.chat_session_id,
+                    max_messages=10
+                )
+                
+                if context_summary:
+                    conversation_context += f"Previous conversation summary: {context_summary}\n\n"
+                
+                if conversation_history:
+                    conversation_context += "Recent conversation:\n"
+                    for msg in conversation_history[-5:]:
+                        conversation_context += f"{msg.role.value}: {msg.content}\n"
+                    conversation_context += "\n"
+                    
+                conversation_context_used = len(conversation_history) > 0 or bool(context_summary)
+            
+            # Get document clauses with caching
+            yield f"data: {json.dumps({'type': 'status', 'message': 'Fetching document clauses...'})}\n\n"
+            
+            cache_key = CacheKeys.document_clauses(request.doc_id)
+            clauses = await cache_service.get(cache_key)
+            
+            if clauses is None:
+                clauses = await firestore_client.get_document_clauses(request.doc_id)
+                if clauses:
+                    await cache_service.set(cache_key, clauses, ttl=1800)
+            
+            if not clauses:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'No clauses found for document {request.doc_id}'})}\n\n"
+                return
+            
+            # Filter clauses with embeddings
+            clauses_with_embeddings = [
+                clause for clause in clauses 
+                if clause.get("embedding") and len(clause.get("embedding", [])) > 0
+            ]
+            
+            if not clauses_with_embeddings:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Document processing incomplete. Please try again later.'})}\n\n"
+                return
+            
+            # Find relevant clauses
+            yield f"data: {json.dumps({'type': 'status', 'message': f'Searching {len(clauses_with_embeddings)} clauses for relevance...'})}\n\n"
+            
+            relevant_clauses = await embeddings_service.search_similar_clauses(
+                question=request.question,
+                clause_embeddings=clauses_with_embeddings,
+                top_k=5,
+                min_similarity=0.2
+            )
+            
+            if not relevant_clauses:
+                answer_text = "I couldn't find any clauses in this document that relate to your question. Please try rephrasing your question or ask about different aspects of the document."
+                
+                yield f"data: {json.dumps({'type': 'answer', 'content': answer_text, 'confidence': 0.0, 'sources': [], 'chat_session_id': chat_session_id})}\n\n"
+                
+                if chat_session_id:
+                    background_tasks.add_task(
+                        chat_session_service.add_message,
+                        chat_session_id,
+                        AddMessageRequest(
+                            role=MessageRole.ASSISTANT,
+                            content=answer_text,
+                            metadata={"no_relevant_clauses": True, "doc_id": request.doc_id}
+                        )
+                    )
+                return
+            
+            # Generate answer
+            yield f"data: {json.dumps({'type': 'status', 'message': f'Found {len(relevant_clauses)} relevant clauses. Generating answer...'})}\n\n"
+            
+            enhanced_question = request.question
+            if conversation_context:
+                enhanced_question = f"Previous context:\n{conversation_context}\n\nCurrent question: {request.question}"
+            
+            qa_result = await gemini_client.answer_question(
+                question=enhanced_question,
+                relevant_clauses=relevant_clauses,
+                doc_id=request.doc_id
+            )
+            
+            # Build sources
+            sources = []
+            for clause in relevant_clauses:
+                if clause.get("clause_id") in qa_result.get("used_clause_ids", []):
+                    original_text = clause.get("original_text", "")
+                    snippet = original_text[:300] + "..." if len(original_text) > 300 else original_text
+                    
+                    sources.append({
+                        "clause_id": clause["clause_id"],
+                        "clause_number": clause.get("order"),
+                        "category": clause.get("category"),
+                        "snippet": snippet,
+                        "relevance_score": clause.get("similarity", 0.0)
+                    })
+            
+            # Send final answer
+            yield f"data: {json.dumps({'type': 'answer', 'content': qa_result.get('answer', ''), 'confidence': qa_result.get('confidence', 0.0), 'sources': sources, 'chat_session_id': chat_session_id, 'conversation_context_used': conversation_context_used})}\n\n"
+            
+            # Background tasks for storage
+            background_tasks.add_task(
+                _store_qa_history,
+                firestore_client,
+                request,
+                qa_result,
+                relevant_clauses
+            )
+            
+            if chat_session_id:
+                background_tasks.add_task(
+                    chat_session_service.add_message,
+                    chat_session_id,
+                    AddMessageRequest(
+                        role=MessageRole.ASSISTANT,
+                        content=qa_result.get("answer", ""),
+                        sources=sources,
+                        metadata={
+                            "used_clause_ids": qa_result.get("used_clause_ids", []),
+                            "confidence": qa_result.get("confidence", 0.0),
+                            "doc_id": request.doc_id,
+                            "conversation_context_used": conversation_context_used
+                        }
+                    )
+                )
+            
+            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+            
+        except Exception as e:
+            logger.error(f"Streaming Q&A error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Internal server error processing question'})}\n\n"
+    
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
+        }
+    )
 
 
 async def _generate_and_store_embeddings(
@@ -328,7 +547,8 @@ async def _store_qa_history(
 async def get_qa_history(
     doc_id: str,
     limit: int = 10,
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    firestore_client: FirestoreClient = Depends(get_firestore_client)
 ) -> List[Dict[str, Any]]:
     """
     Get Q&A history for a document.
@@ -341,7 +561,6 @@ async def get_qa_history(
         List of previous questions and answers
     """
     try:
-        firestore_client = FirestoreClient()
         db = firestore_client.db
 
         query = (
@@ -374,3 +593,48 @@ async def get_qa_history(
     except Exception as e:
         logger.error(f"Failed to fetch Q&A history for {doc_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve Q&A history")
+
+
+@router.get("/cache/stats")
+async def get_cache_stats(
+    settings: Settings = Depends(get_settings),
+    cache_service: InMemoryCache = Depends(get_cache_service)
+) -> Dict[str, Any]:
+    """
+    Get cache statistics for monitoring performance.
+    
+    Returns:
+        Cache statistics including hit rate, size, etc.
+    """
+    try:
+        stats = cache_service.get_stats()
+        return {
+            "cache_stats": stats,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Failed to get cache stats: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve cache statistics")
+
+
+@router.post("/cache/clear")
+async def clear_cache(
+    settings: Settings = Depends(get_settings),
+    cache_service: InMemoryCache = Depends(get_cache_service)
+) -> Dict[str, Any]:
+    """
+    Clear all cache entries (admin endpoint).
+    
+    Returns:
+        Success message
+    """
+    try:
+        await cache_service.clear()
+        logger.info("Cache cleared successfully")
+        return {
+            "message": "Cache cleared successfully",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Failed to clear cache: {e}")
+        raise HTTPException(status_code=500, detail="Failed to clear cache")

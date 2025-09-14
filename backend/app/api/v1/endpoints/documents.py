@@ -23,13 +23,10 @@ from app.models.document import (
     ReadabilityMetrics
 )
 from app.services.document_orchestrator import DocumentOrchestrator
+from app.dependencies.services import get_document_orchestrator
 
 router = APIRouter()
 logger = get_logger(__name__)
-
-# Initialize orchestrator
-orchestrator = DocumentOrchestrator()
-logger.info("DocumentOrchestrator initialized in documents.py")
 
 
 def validate_pdf_page_count(file_content: bytes, filename: str, max_pages: int) -> int:
@@ -79,6 +76,7 @@ async def process_document_background(
     file_content: bytes,
     filename: str,
     mime_type: str,
+    orchestrator: DocumentOrchestrator,
     session_id: Optional[str] = None
 ):
     """Background task to process document."""
@@ -108,7 +106,8 @@ async def ingest_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     session_id: Optional[str] = Form(None),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    orchestrator: DocumentOrchestrator = Depends(get_document_orchestrator)
 ) -> DocumentUploadResponse:
     """
     Ingest a legal document for processing.
@@ -167,6 +166,7 @@ async def ingest_document(
             file_content,
             file.filename,
             file.content_type,
+            orchestrator,
             session_id
         )
         
@@ -193,7 +193,8 @@ async def ingest_documents_batch(
     files: List[UploadFile] = File(...),
     session_id: Optional[str] = Form(None),
     max_concurrent: Optional[int] = Form(3),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    orchestrator: DocumentOrchestrator = Depends(get_document_orchestrator)
 ) -> BatchUploadResponse:
     """
     Ingest multiple legal documents for parallel processing.
@@ -311,6 +312,7 @@ async def ingest_documents_batch(
                     file_content,
                     file.filename,
                     file.content_type,
+                    orchestrator,
                     session_id
                 )
                 
@@ -482,7 +484,8 @@ async def cancel_processing(doc_id: str) -> Dict[str, Any]:
 @router.get("/status/{doc_id}")
 async def get_document_status(
     doc_id: str,
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    orchestrator: DocumentOrchestrator = Depends(get_document_orchestrator)
 ) -> Dict[str, Any]:
     """
     Get document processing status.
@@ -507,7 +510,8 @@ async def get_document_status(
 @router.get("/clauses", response_model=List[ClauseSummary])
 async def get_document_clauses(
     doc_id: str,
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    orchestrator: DocumentOrchestrator = Depends(get_document_orchestrator)
 ) -> List[ClauseSummary]:
     """
     Get clause summaries for a document.
@@ -571,7 +575,8 @@ async def get_document_clauses(
 async def get_clause_detail(
     clause_id: str,
     doc_id: str,
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    orchestrator: DocumentOrchestrator = Depends(get_document_orchestrator)
 ) -> ClauseDetail:
     """
     Get detailed information about a specific clause.

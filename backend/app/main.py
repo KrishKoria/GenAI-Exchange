@@ -27,6 +27,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(f"Debug mode: {settings.DEBUG}")
     
+    # Initialize all services for optimal performance
+    logger.info("Pre-initializing services for optimal performance...")
+    from app.dependencies.services import initialize_services
+    await initialize_services()
+    
     # Initialize and clear Document AI cache to ensure latest configuration
     logger.info("Initializing DocumentOrchestrator and clearing Document AI cache...")
     from app.services.document_orchestrator import DocumentOrchestrator
@@ -34,13 +39,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     orchestrator.document_processor.clear_cache()
     logger.info("Document AI HTTP client cache cleared successfully")
     
-    # Initialize GCP services here if needed
-    # await initialize_gcp_services()
-    
     yield
     
     logger.info("Shutting down ClauseCompass API server...")
-    # Cleanup resources here if needed
+    # Cleanup service connections
+    from app.dependencies.services import reset_services
+    reset_services()
 
 
 def create_app() -> FastAPI:
