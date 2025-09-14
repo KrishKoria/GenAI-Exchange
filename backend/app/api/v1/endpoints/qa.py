@@ -20,12 +20,14 @@ from app.services.firestore_client import FirestoreClient, FirestoreError
 from app.services.embeddings_service import EmbeddingsService, EmbeddingsError
 from app.services.gemini_client import GeminiClient, GeminiError
 from app.services.chat_session_service import ChatSessionService
+from app.services.language_detection_service import LanguageDetectionService
 from app.dependencies.services import (
     get_firestore_client,
     get_embeddings_service,
     get_gemini_client,
     get_chat_session_service,
-    get_cache_service
+    get_cache_service,
+    get_language_detection_service
 )
 from app.services.cache_service import CacheKeys, InMemoryCache
 
@@ -43,6 +45,7 @@ async def ask_question(
     embeddings_service: EmbeddingsService = Depends(get_embeddings_service),
     gemini_client: GeminiClient = Depends(get_gemini_client),
     chat_session_service: ChatSessionService = Depends(get_chat_session_service),
+    language_detection_service: LanguageDetectionService = Depends(get_language_detection_service),
     cache_service: InMemoryCache = Depends(get_cache_service)
 ) -> AnswerResponse:
     """
@@ -59,11 +62,43 @@ async def ask_question(
         HTTPException: If document not found or question invalid
     """
     logger.info(f"Q&A request for doc_id: {request.doc_id}")
-    
+
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
-    
+
     try:
+        # Auto-detect language if enabled, otherwise use override or default
+        detected_language = None
+        response_language = language  # Default to the language parameter
+        language_detection_confidence = None
+        detection_method = None
+
+        if request.auto_detect_language:
+            logger.info("Auto-detecting language from question")
+            detection_result = await language_detection_service.detect_language_advanced(
+                text=request.question,
+                session_id=request.session_id,
+                context=request.session_context
+            )
+
+            detected_language = detection_result.language
+            language_detection_confidence = detection_result.confidence
+            detection_method = detection_result.method
+
+            # Use detected language if confidence is high enough, otherwise use override or default
+            if request.language_override:
+                response_language = request.language_override
+                logger.info(f"Using language override: {response_language}")
+            elif detection_result.confidence > 0.8:
+                response_language = detected_language
+                logger.info(f"Using auto-detected language: {response_language} (confidence: {detection_result.confidence:.2f})")
+            else:
+                logger.info(f"Low detection confidence ({detection_result.confidence:.2f}), using default: {response_language}")
+        elif request.language_override:
+            response_language = request.language_override
+            logger.info(f"Using manual language override: {response_language}")
+
+        logger.info(f"Final response language: {response_language}")
         # Check if this is a chat session-based request
         conversation_context = ""
         conversation_context_used = False
@@ -202,7 +237,11 @@ async def ask_question(
                 confidence=0.0,
                 sources=[],
                 chat_session_id=chat_session_id,
-                conversation_context_used=conversation_context_used
+                conversation_context_used=conversation_context_used,
+                detected_language=detected_language,
+                response_language=response_language,
+                language_detection_confidence=language_detection_confidence,
+                detection_method=detection_method
             )
         
         logger.info(f"Found {len(relevant_clauses)} relevant clauses")
@@ -219,7 +258,7 @@ async def ask_question(
             question=enhanced_question,
             relevant_clauses=relevant_clauses,
             doc_id=request.doc_id,
-            language=language
+            language=response_language
         )
         
         # 5. Build response with proper source citations
@@ -272,7 +311,11 @@ async def ask_question(
             confidence=qa_result.get("confidence", 0.0),
             sources=sources,
             chat_session_id=chat_session_id,
-            conversation_context_used=conversation_context_used
+            conversation_context_used=conversation_context_used,
+            detected_language=detected_language,
+            response_language=response_language,
+            language_detection_confidence=language_detection_confidence,
+            detection_method=detection_method
         )
         
     except HTTPException:
@@ -296,6 +339,7 @@ async def ask_question_stream(
     embeddings_service: EmbeddingsService = Depends(get_embeddings_service),
     gemini_client: GeminiClient = Depends(get_gemini_client),
     chat_session_service: ChatSessionService = Depends(get_chat_session_service),
+    language_detection_service: LanguageDetectionService = Depends(get_language_detection_service),
     cache_service: InMemoryCache = Depends(get_cache_service)
 ):
     """
@@ -311,7 +355,34 @@ async def ask_question_stream(
             if not request.question.strip():
                 yield f"data: {json.dumps({'type': 'error', 'message': 'Question cannot be empty'})}\n\n"
                 return
-            
+
+            # Auto-detect language if enabled, otherwise use override or default
+            detected_language = None
+            response_language = language  # Default to the language parameter
+            language_detection_confidence = None
+            detection_method = None
+
+            if request.auto_detect_language:
+                yield f"data: {json.dumps({'type': 'status', 'message': 'Detecting language...'})}\n\n"
+                detection_result = await language_detection_service.detect_language_advanced(
+                    text=request.question,
+                    session_id=request.session_id,
+                    context=request.session_context
+                )
+
+                detected_language = detection_result.language
+                language_detection_confidence = detection_result.confidence
+                detection_method = detection_result.method
+
+                # Use detected language if confidence is high enough, otherwise use override or default
+                if request.language_override:
+                    response_language = request.language_override
+                elif detection_result.confidence > 0.8:
+                    response_language = detected_language
+                    yield f"data: {json.dumps({'type': 'language_detection', 'detected_language': response_language.value, 'confidence': detection_result.confidence})}\n\n"
+            elif request.language_override:
+                response_language = request.language_override
+
             # Add user message to chat session immediately (background task)
             conversation_context = ""
             conversation_context_used = False
@@ -415,7 +486,7 @@ async def ask_question_stream(
                 question=enhanced_question,
                 relevant_clauses=relevant_clauses,
                 doc_id=request.doc_id,
-                language=language
+                language=response_language
             )
             
             # Build sources

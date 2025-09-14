@@ -11,6 +11,7 @@ from app.services.gemini_client import GeminiClient
 from app.services.chat_session_service import ChatSessionService
 from app.services.cache_service import InMemoryCache, get_cache
 from app.services.document_orchestrator import DocumentOrchestrator
+from app.services.language_detection_service import LanguageDetectionService
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ _embeddings_service: Optional[EmbeddingsService] = None
 _gemini_client: Optional[GeminiClient] = None
 _chat_session_service: Optional[ChatSessionService] = None
 _document_orchestrator: Optional[DocumentOrchestrator] = None
+_language_detection_service: Optional[LanguageDetectionService] = None
 
 
 @lru_cache()
@@ -96,11 +98,24 @@ def get_document_orchestrator() -> DocumentOrchestrator:
     return _document_orchestrator
 
 
+@lru_cache()
+def get_language_detection_service() -> LanguageDetectionService:
+    """
+    Get singleton Language Detection service instance.
+    Uses lru_cache to ensure only one instance is created.
+    """
+    global _language_detection_service
+    if _language_detection_service is None:
+        logger.info("Initializing singleton Language Detection service")
+        _language_detection_service = LanguageDetectionService()
+    return _language_detection_service
+
+
 def reset_services():
     """
     Reset all service instances (useful for testing or reinitialization).
     """
-    global _firestore_client, _embeddings_service, _gemini_client, _chat_session_service, _document_orchestrator
+    global _firestore_client, _embeddings_service, _gemini_client, _chat_session_service, _document_orchestrator, _language_detection_service
     
     logger.info("Resetting all service instances")
     
@@ -109,6 +124,7 @@ def reset_services():
     _gemini_client = None
     _chat_session_service = None
     _document_orchestrator = None
+    _language_detection_service = None
     
     # Clear lru_cache for all dependency functions
     get_firestore_client.cache_clear()
@@ -116,10 +132,8 @@ def reset_services():
     get_gemini_client.cache_clear()
     get_chat_session_service.cache_clear()
     get_document_orchestrator.cache_clear()
+    get_language_detection_service.cache_clear()
     get_cache_service.cache_clear()
-    get_embeddings_service.cache_clear()
-    get_gemini_client.cache_clear()
-    get_chat_session_service.cache_clear()
 
 
 async def initialize_services():
@@ -133,6 +147,7 @@ async def initialize_services():
     embeddings_service = get_embeddings_service()
     gemini_client = get_gemini_client()
     chat_session_service = get_chat_session_service()
+    language_detection_service = get_language_detection_service()
     cache_service = get_cache_service()
     
     # Initialize Gemini client (async initialization)

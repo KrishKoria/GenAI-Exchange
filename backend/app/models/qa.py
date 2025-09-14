@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 from pydantic import BaseModel, Field
+from app.models.document import SupportedLanguage
 
 
 class QuestionRequest(BaseModel):
@@ -14,6 +15,11 @@ class QuestionRequest(BaseModel):
     session_id: Optional[str] = Field(description="Session identifier for tracking")
     chat_session_id: Optional[str] = Field(description="Chat session identifier for memory context", default=None)
     use_conversation_memory: bool = Field(description="Whether to use conversation memory", default=False)
+
+    # Auto Language Detection fields
+    auto_detect_language: bool = Field(description="Automatically detect language from question", default=True)
+    language_override: Optional[SupportedLanguage] = Field(description="Manual language override", default=None)
+    session_context: Optional[str] = Field(description="Additional context for better language detection", default=None)
 
 
 class SourceCitation(BaseModel):
@@ -35,6 +41,12 @@ class AnswerResponse(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     chat_session_id: Optional[str] = Field(description="Associated chat session", default=None)
     conversation_context_used: bool = Field(description="Whether conversation history was used", default=False)
+
+    # Language Detection Information
+    detected_language: Optional[SupportedLanguage] = Field(description="Automatically detected language", default=None)
+    response_language: SupportedLanguage = Field(description="Language used for response", default=SupportedLanguage.ENGLISH)
+    language_detection_confidence: Optional[float] = Field(description="Language detection confidence", default=None)
+    detection_method: Optional[str] = Field(description="Method used for detection", default=None)
 
 
 class QAHistory(BaseModel):

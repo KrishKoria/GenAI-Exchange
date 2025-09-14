@@ -28,12 +28,14 @@ from app.services.chat_session_service import ChatSessionService
 from app.services.firestore_client import FirestoreClient, FirestoreError
 from app.services.embeddings_service import EmbeddingsService, EmbeddingsError
 from app.services.gemini_client import GeminiClient, GeminiError
+from app.services.language_detection_service import LanguageDetectionService
 from app.dependencies.services import (
     get_chat_session_service,
     get_firestore_client,
     get_embeddings_service,
     get_gemini_client,
-    get_cache_service
+    get_cache_service,
+    get_language_detection_service
 )
 from app.services.cache_service import InMemoryCache
 
@@ -240,6 +242,7 @@ async def ask_question_with_memory(
     firestore_client: FirestoreClient = Depends(get_firestore_client),
     embeddings_service: EmbeddingsService = Depends(get_embeddings_service),
     gemini_client: GeminiClient = Depends(get_gemini_client),
+    language_detection_service: LanguageDetectionService = Depends(get_language_detection_service),
     cache_service: InMemoryCache = Depends(get_cache_service)
 ) -> ChatAnswerResponse:
     """
@@ -267,11 +270,43 @@ async def ask_question_with_memory(
         # 2. Validate that session has documents
         if not session.selected_documents:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail="No documents selected in this chat session. Please add documents first."
             )
-        
-        # 3. Get conversation context if requested
+
+        # 3. Auto-detect language if enabled, otherwise use override or default
+        detected_language = None
+        response_language = language  # Default to the language parameter
+        language_detection_confidence = None
+        detection_method = None
+
+        if request.auto_detect_language:
+            logger.info(f"Auto-detecting language for session {session_id}")
+            detection_result = await language_detection_service.detect_language_advanced(
+                text=request.question,
+                session_id=session_id
+            )
+
+            detected_language = detection_result.language
+            language_detection_confidence = detection_result.confidence
+            detection_method = detection_result.method
+
+            # Use detected language if confidence is high enough, otherwise use override or default
+            if request.language_override:
+                response_language = request.language_override
+                logger.info(f"Using language override: {response_language}")
+            elif detection_result.confidence > 0.8:
+                response_language = detected_language
+                logger.info(f"Using auto-detected language: {response_language} (confidence: {detection_result.confidence:.2f})")
+            else:
+                logger.info(f"Low detection confidence ({detection_result.confidence:.2f}), using default: {response_language}")
+        elif request.language_override:
+            response_language = request.language_override
+            logger.info(f"Using manual language override: {response_language}")
+
+        logger.info(f"Final response language for session {session_id}: {response_language}")
+
+        # 4. Get conversation context if requested
         conversation_history = []
         context_summary = None
         conversation_context_used = False
@@ -351,6 +386,10 @@ async def ask_question_with_memory(
                 confidence=0.0,
                 sources=[],
                 conversation_context_used=conversation_context_used,
+                detected_language=detected_language,
+                response_language=response_language,
+                language_detection_confidence=language_detection_confidence,
+                detection_method=detection_method,
                 timestamp=assistant_message.timestamp
             )
         
@@ -378,7 +417,7 @@ async def ask_question_with_memory(
             question=enhanced_question,
             relevant_clauses=all_relevant_clauses,
             doc_id=session.selected_documents[0].doc_id,  # Use first document ID for compatibility
-            language=language
+            language=response_language
         )
         
         # 7. Build source citations
@@ -421,6 +460,10 @@ async def ask_question_with_memory(
             sources=sources,
             conversation_context_used=conversation_context_used,
             additional_insights=qa_result.get("additional_insights"),
+            detected_language=detected_language,
+            response_language=response_language,
+            language_detection_confidence=language_detection_confidence,
+            detection_method=detection_method,
             timestamp=assistant_message.timestamp
         )
         

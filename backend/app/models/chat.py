@@ -6,6 +6,7 @@ from datetime import datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field
+from app.models.document import SupportedLanguage
 
 
 class MessageRole(str, Enum):
@@ -151,6 +152,10 @@ class ChatQuestionRequest(BaseModel):
         le=50
     )
 
+    # Auto Language Detection fields
+    auto_detect_language: bool = Field(description="Automatically detect language from question", default=True)
+    language_override: Optional[SupportedLanguage] = Field(description="Manual language override", default=None)
+
 
 class ChatAnswerResponse(BaseModel):
     """Enhanced answer response with session context."""
@@ -165,10 +170,16 @@ class ChatAnswerResponse(BaseModel):
         default=False
     )
     additional_insights: Optional[str] = Field(
-        description="Proactive insights and recommendations", 
+        description="Proactive insights and recommendations",
         default=None
     )
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+    # Language Detection Information
+    detected_language: Optional[SupportedLanguage] = Field(description="Automatically detected language", default=None)
+    response_language: SupportedLanguage = Field(description="Language used for response", default=SupportedLanguage.ENGLISH)
+    language_detection_confidence: Optional[float] = Field(description="Language detection confidence", default=None)
+    detection_method: Optional[str] = Field(description="Method used for detection", default=None)
 
 
 class SessionSummaryRequest(BaseModel):
