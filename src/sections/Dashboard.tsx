@@ -11,7 +11,6 @@ import {
   Flame,
   BarChart3,
   X,
-  Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,7 +28,6 @@ import { ChatInterface, ChatMessage } from "@/components/ChatInterface";
 import { UploadSuccessCard } from "@/components/UploadSuccessCard";
 import { ReadabilityPanel } from "@/components/ReadabilityPanel";
 import { LanguageSelector } from "@/components/LanguageSelector";
-import { QueueStatusPanel } from "@/components/QueueStatusPanel";
 import { useTranslations } from "next-intl";
 // Simple client-side file validation helpers
 const validateFileBasics = (file: File) => {
@@ -112,7 +110,6 @@ export const Dashboard = () => {
   const [autoDismissTimers, setAutoDismissTimers] = useState<{
     [key: string]: NodeJS.Timeout;
   }>({});
-  const [showQueuePanel, setShowQueuePanel] = useState(false);
 
   const { toast } = useToast();
 
@@ -749,9 +746,6 @@ export const Dashboard = () => {
             <Button variant="secondary" onClick={handleUploadClick}>
               <Upload className="mr-2 h-4 w-4" /> {t("navigation.upload")}
             </Button>
-            <Button variant="outline" onClick={() => setShowQueuePanel(true)}>
-              <Clock className="mr-2 h-4 w-4" /> Queue
-            </Button>
             <input
               ref={fileInputRef}
               type="file"
@@ -1007,12 +1001,6 @@ export const Dashboard = () => {
           </div>
         </div>
       </aside>
-
-      {/* Queue Status Panel */}
-      <QueueStatusPanel
-        isVisible={showQueuePanel}
-        onClose={() => setShowQueuePanel(false)}
-      />
     </div>
   );
 };
