@@ -82,7 +82,6 @@ class FirestoreClient:
                 "created_at": firestore.SERVER_TIMESTAMP,
                 "updated_at": firestore.SERVER_TIMESTAMP,
                 "processed_at": None,
-                "baseline_readability": None,
                 "masked": False,
                 "session_id": session_id,
                 "clause_count": 0,
@@ -172,45 +171,6 @@ class FirestoreClient:
             except GoogleAPIError as e:
                 logger.error(f"Failed to update document status: {e}")
                 raise FirestoreError(f"Failed to update document status: {e}")
-    
-    async def update_document_readability(
-        self, 
-        doc_id: str, 
-        baseline_readability: Dict[str, float]
-    ) -> bool:
-        """
-        Update document baseline readability metrics.
-        
-        Args:
-            doc_id: Document identifier
-            baseline_readability: Readability metrics
-            
-        Returns:
-            True if update successful
-        """
-        try:
-            doc_ref = self.db.collection("documents").document(doc_id)
-            
-            # First check if document exists
-            doc = doc_ref.get()
-            if not doc.exists:
-                logger.error(f"Document {doc_id} does not exist for readability update")
-                raise FirestoreError(f"Document {doc_id} not found for readability update")
-            
-            doc_ref.update({
-                "baseline_readability": baseline_readability,
-                "updated_at": firestore.SERVER_TIMESTAMP
-            })
-            
-            logger.info(f"Document readability updated: {doc_id}")
-            return True
-            
-        except NotFound as e:
-            logger.error(f"Document {doc_id} not found for readability update: {e}")
-            raise FirestoreError(f"Document {doc_id} not found for readability update")
-        except GoogleAPIError as e:
-            logger.error(f"Failed to update document readability: {e}")
-            raise FirestoreError(f"Failed to update readability: {e}")
     
     # Clause Operations
     

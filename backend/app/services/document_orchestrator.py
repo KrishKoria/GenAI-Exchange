@@ -113,17 +113,8 @@ class DocumentOrchestrator:
                 if not clause_candidates:
                     raise Exception("No clauses could be extracted from document")
                 
-                # Stage 4: Baseline Readability Analysis
-                logger.info("Stage 4: Baseline readability analysis")
-                baseline_readability = await self.readability_service.analyze_text_readability(masked_text)
-                
-                await self.firestore_client.update_document_readability(
-                    doc_id, self.readability_service._metrics_to_dict(baseline_readability)
-                )
-                processing_result["stages_completed"].append("baseline_readability")
-                
-                # Stage 5: Gemini Summarization
-                logger.info("Stage 5: AI summarization")
+                # Stage 4: Gemini Summarization
+                logger.info("Stage 4: AI summarization")
                 summarization_results = await self.gemini_client.batch_summarize_clauses(
                     clause_candidates, include_negotiation_tips=True
                 )
@@ -132,8 +123,8 @@ class DocumentOrchestrator:
                 if len(summarization_results) != len(clause_candidates):
                     logger.warning(f"Summarization count mismatch: {len(summarization_results)} vs {len(clause_candidates)}")
                 
-                # Stages 6 & 7: Risk Analysis and Readability Comparison (Concurrent)
-                logger.info("Stages 6 & 7: Risk analysis and readability analysis (concurrent)")
+                # Stages 5 & 6: Risk Analysis and Readability Comparison (Concurrent)
+                logger.info("Stages 5 & 6: Risk analysis and readability analysis (concurrent)")
                 
                 # Create parallel tasks for risk analysis
                 risk_tasks = []
@@ -162,8 +153,8 @@ class DocumentOrchestrator:
                 
                 processing_result["stages_completed"].extend(["risk_analysis", "readability_analysis"])
                 
-                # Stage 8: Data Assembly and Storage
-                logger.info("Stage 8: Assembling and storing clause data")
+                # Stage 7: Data Assembly and Storage
+                logger.info("Stage 7: Assembling and storing clause data")
                 
                 clauses_data = []
                 for i, (clause, summary_result, risk_assessment, readability_comp) in enumerate(
@@ -199,8 +190,8 @@ class DocumentOrchestrator:
                 clause_ids = await self.firestore_client.create_clauses(doc_id, clauses_data)
                 processing_result["stages_completed"].append("data_storage")
                 
-                # Stage 8.5: Generate Embeddings for Clauses (Background Processing)
-                logger.info("Stage 8.5: Starting background embeddings generation")
+                # Stage 7.5: Generate Embeddings for Clauses (Background Processing)
+                logger.info("Stage 7.5: Starting background embeddings generation")
                 
                 # Start embeddings generation as a fire-and-forget background task
                 embeddings_task = asyncio.create_task(
@@ -211,14 +202,14 @@ class DocumentOrchestrator:
                 processing_result["stages_completed"].append("embeddings_background_started")
                 logger.info(f"Background embeddings generation started for {len(clauses_data)} clauses")
                 
-                # Stage 9: Generate Document-Level Analytics
-                logger.info("Stage 9: Document-level analytics")
+                # Stage 8: Generate Document-Level Analytics
+                logger.info("Stage 8: Document-level analytics")
                 
                 document_risk_profile = await self.risk_analyzer.analyze_document_risk_profile(risk_assessments)
                 document_readability_analysis = await self.readability_service.analyze_document_readability(readability_comparisons)
                 
-                # Stage 10: Final Status Update
-                logger.info("Stage 10: Final status update")
+                # Stage 9: Final Status Update
+                logger.info("Stage 9: Final status update")
                 
                 final_metadata = {
                     "document_risk_profile": document_risk_profile,
@@ -335,8 +326,6 @@ class DocumentOrchestrator:
         except Exception:
             health_status["privacy_service"] = False
         
-        # Document AI and Gemini health checks would require test requests
-        # For now, assume they're healthy if no initialization errors
         health_status["document_ai"] = True  # Could implement actual health check
         health_status["gemini"] = True      # Could implement actual health check
         

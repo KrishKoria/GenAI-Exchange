@@ -7,6 +7,7 @@ import {
   qaApi,
   chatSessionApi,
   DocumentUploadResponse,
+  BatchUploadResponse,
   AnswerResponse,
   QuestionRequest,
   CreateChatSessionRequest,
@@ -160,6 +161,63 @@ export function useDocumentUpload(options?: UseDocumentUploadOptions) {
 }
 
 // ========================================
+// BATCH DOCUMENT UPLOAD MUTATION
+// ========================================
+
+interface UseBatchDocumentUploadOptions {
+  onSuccess?: (data: BatchUploadResponse) => void;
+  onError?: (error: ApiError) => void;
+}
+
+export function useBatchDocumentUpload(
+  options?: UseBatchDocumentUploadOptions
+) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      files,
+      sessionId,
+    }: {
+      files: File[];
+      sessionId?: string;
+    }) => {
+      return documentApi.batchUploadDocuments(files, sessionId);
+    },
+    onSuccess: (data) => {
+      // Invalidate all document queries to refresh the data
+      queryClient.invalidateQueries({ queryKey: documentQueryKeys.all });
+
+      // Set query data for each successfully uploaded document
+      data.uploads?.forEach((upload) => {
+        if (upload.status !== "failed") {
+          queryClient.setQueryData(
+            documentQueryKeys.status(upload.doc_id),
+            upload
+          );
+        }
+      });
+
+      options?.onSuccess?.(data);
+    },
+    onError: (error: ApiError) => {
+      // Don't log validation errors again - the interceptor already handles this
+      const isValidationError =
+        error?.response?.status &&
+        (error.response.status === 422 ||
+          error.response.status === 413 ||
+          error.response.status === 400);
+
+      if (!isValidationError) {
+        console.error("Batch document upload failed:", error);
+      }
+
+      options?.onError?.(error);
+    },
+  });
+}
+
+// ========================================
 // Q&A HOOKS
 // ========================================
 
@@ -240,6 +298,39 @@ export function useDocumentWorkflow() {
   return {
     upload: uploadMutation,
   };
+}
+
+/**
+ * Hook to get clauses from multiple documents
+ */
+export function useMultipleDocumentsClauses(docIds: string[]) {
+  // Create queries for each document
+  const clausesQueries = useQuery({
+    queryKey: ["documents", "clauses", "multi", ...docIds.sort()],
+    queryFn: async () => {
+      if (docIds.length === 0) return [];
+
+      // Fetch clauses for all documents in parallel
+      const promises = docIds.map((docId) =>
+        documentApi.getDocumentClauses(docId).catch((error) => {
+          console.warn(`Failed to fetch clauses for document ${docId}:`, error);
+          return []; // Return empty array for failed documents
+        })
+      );
+
+      const results = await Promise.all(promises);
+
+      // Flatten all clauses into a single array
+      const allClauses = results.flat();
+
+      return allClauses;
+    },
+    enabled: docIds.length > 0,
+    staleTime: 1 * 60 * 1000, // 1 minute
+    retry: 2,
+  });
+
+  return clausesQueries;
 }
 
 /**

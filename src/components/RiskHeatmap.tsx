@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { useTranslations } from "next-intl";
 import { ClauseSummary, RiskLevel } from "@/lib/api";
 
 interface RiskHeatmapProps {
@@ -44,10 +45,11 @@ const RISK_COLORS = {
   attention: "bg-red-500",
 };
 
-const RISK_LABELS = {
-  low: "Low Risk",
-  moderate: "Moderate Risk",
-  attention: "Needs Attention",
+// Risk label keys for translation
+const RISK_LABEL_KEYS = {
+  low: "low",
+  moderate: "moderate",
+  attention: "attention",
 };
 
 export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
@@ -56,6 +58,7 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
   isLoading = false,
   error = null,
 }) => {
+  const t = useTranslations();
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
 
   // Process clauses into heatmap data
@@ -200,9 +203,9 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
   if (error) {
     return (
       <div className={`p-4 text-center text-red-400 ${className}`}>
-        <div className="text-sm">Failed to load risk analysis</div>
+        <div className="text-sm">{t('analysis.failedToLoad')}</div>
         <div className="text-xs mt-1 text-white/60">
-          {error.message || "Please refresh or try again"}
+          {error.message || t('analysis.refreshToTry')}
         </div>
       </div>
     );
@@ -211,9 +214,9 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
   if (clauses.length === 0) {
     return (
       <div className={`p-4 text-center text-white/50 ${className}`}>
-        <div className="text-sm">No clause data available</div>
+        <div className="text-sm">{t('analysis.noClauseData')}</div>
         <div className="text-xs mt-1">
-          Upload a document to see risk analysis
+          {t('analysis.uploadForAnalysis')}
         </div>
       </div>
     );
@@ -224,14 +227,14 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
       {/* Legend */}
       <div className="mb-4">
         <div className="text-xs font-medium text-white/70 mb-2">
-          Risk Levels
+          {t('riskLevels.riskLevelsTitle')}
         </div>
         <div className="flex gap-3">
           {RISK_LEVELS.map((level) => (
             <div key={level} className="flex items-center gap-2">
               <div className={`w-3 h-3 rounded-sm ${RISK_COLORS[level]}`}></div>
               <span className="text-xs text-white/60">
-                {RISK_LABELS[level]}
+                {t(`riskLevels.${RISK_LABEL_KEYS[level]}`)}
               </span>
             </div>
           ))}
@@ -250,7 +253,7 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
                 key={level}
                 className="w-16 text-xs text-white/60 text-center px-1"
               >
-                {RISK_LABELS[level]}
+                {t(`riskLevels.${RISK_LABEL_KEYS[level]}`)}
               </div>
             ))}
           </div>
@@ -304,19 +307,19 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
             <div className="text-lg font-semibold text-white">
               {clauses.length}
             </div>
-            <div className="text-xs text-white/60">Total Clauses</div>
+            <div className="text-xs text-white/60">{t('analysis.totalClauses')}</div>
           </div>
           <div>
             <div className="text-lg font-semibold text-red-400">
               {clauses.filter((c) => c.risk_level === "attention").length}
             </div>
-            <div className="text-xs text-white/60">High Risk</div>
+            <div className="text-xs text-white/60">{t('analysis.highRisk')}</div>
           </div>
           <div>
             <div className="text-lg font-semibold text-yellow-400">
               {clauses.filter((c) => c.risk_level === "moderate").length}
             </div>
-            <div className="text-xs text-white/60">Moderate Risk</div>
+            <div className="text-xs text-white/60">{t('analysis.moderateRisk')}</div>
           </div>
         </div>
       </div>
@@ -328,7 +331,7 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
           style={{ left: tooltip.x, top: tooltip.y }}
         >
           <div className="text-sm font-medium text-white mb-1">
-            {tooltip.cell.category} - {RISK_LABELS[tooltip.cell.riskLevel]}
+            {tooltip.cell.category} - {t(`riskLevels.${RISK_LABEL_KEYS[tooltip.cell.riskLevel]}`)}
           </div>
           <div className="text-xs text-white/80 mb-2">
             {tooltip.cell.count} clause{tooltip.cell.count !== 1 ? "s" : ""} (

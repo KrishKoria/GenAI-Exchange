@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     
     # Vertex AI settings
     GEMINI_MODEL_NAME: str = Field(
-        default="gemini-1.5-flash",
+        default="gemini-2.5-flash",
         description="Gemini model name"
     )
     VERTEX_AI_LOCATION: str = Field(default="us-central1", description="Vertex AI location")
@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE_MB: int = Field(default=10, description="Maximum file size in MB")
     MAX_PAGES: int = Field(default=10, description="Maximum document pages")
     MAX_CLAUSES_PER_BATCH: int = Field(default=10, description="Max clauses per batch")
+    MAX_BATCH_SIZE: int = Field(default=10, description="Maximum number of files in batch upload")
+    DEFAULT_BATCH_CONCURRENCY: int = Field(default=3, description="Default concurrency for batch processing")
     
     # Rate limiting
     RATE_LIMIT_PER_MINUTE: int = Field(default=60, description="Rate limit per minute")

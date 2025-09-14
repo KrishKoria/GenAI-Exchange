@@ -1,7 +1,7 @@
 """
 Document-related Pydantic models
 """
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from enum import Enum
 from datetime import datetime
 
@@ -74,7 +74,6 @@ class DocumentMetadata(BaseModel):
     status: DocumentStatus = Field(description="Processing status")
     created_at: datetime = Field(description="Upload timestamp")
     processed_at: Optional[datetime] = Field(description="Processing completion timestamp")
-    baseline_readability: Optional[Dict[str, float]] = Field(description="Document-level readability")
     masked: bool = Field(description="Whether PII was detected and masked")
     session_id: Optional[str] = Field(description="Session identifier")
 
@@ -87,3 +86,11 @@ class ProcessingProgress(BaseModel):
     message: str = Field(description="Progress message")
     estimated_completion: Optional[datetime] = Field(description="Estimated completion time")
     error_message: Optional[str] = Field(description="Error message if failed")
+
+
+class BatchUploadResponse(BaseModel):
+    """Response model for batch document upload."""
+    uploads: List[DocumentUploadResponse] = Field(description="List of upload responses")
+    successful_count: int = Field(description="Number of successful uploads")
+    failed_count: int = Field(description="Number of failed uploads")
+    total_count: int = Field(description="Total number of files processed")

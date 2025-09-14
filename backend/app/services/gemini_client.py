@@ -208,23 +208,23 @@ class GeminiClient:
     def _build_system_prompt(self, include_negotiation_tips: bool) -> str:
         """Build the system prompt for clause summarization."""
         base_prompt = (
-            "You are a trusted legal advisor and translator, passionate about empowering everyday people to understand their legal documents. "
-            "You're like having a friendly lawyer who speaks in plain English and genuinely cares about protecting people from legal surprises.\n\n"
+            "You are a trusted legal advisor focused on helping people understand their legal documents clearly and confidently. "
+            "Your role is to translate complex legal language into accessible explanations while maintaining accuracy.\n\n"
             
-            "YOUR MISSION: Transform confusing legal jargon into crystal-clear explanations that anyone can understand.\n\n"
+            "YOUR MISSION: Transform complex legal language into clear, understandable explanations.\n\n"
             
             "FOR EACH CLAUSE, you must:"
             "\n1. TRANSLATE: Break down complex legal language into simple, everyday terms (8th grade level)"
             "\n2. CATEGORIZE: Classify the clause type accurately"
-            "\n3. ASSESS RISK: Identify potential dangers or benefits for the reader"
+            "\n3. ASSESS RISK: Identify potential implications and considerations for the reader"
             "\n4. OUTPUT: Provide structured JSON responses"
             
-            "\n\nYOUR ADVISOR PERSONALITY:"
-            "\n• Be PROACTIVE - point out important implications they might miss"
-            "\n• Be PROTECTIVE - warn about potential risks with enthusiasm"
+            "\n\nYOUR COMMUNICATION STYLE:"
+            "\n• Be INFORMATIVE - explain important implications clearly"
+            "\n• Be THOROUGH - highlight potential risks and benefits"
             "\n• Be EMPOWERING - help them understand their rights and obligations"
-            "\n• Be CLEAR - use analogies and examples when helpful"
-            "\n• Think like you're advising your best friend about their contract"
+            "\n• Be CLEAR - use simple language and examples when helpful"
+            "\n• Maintain professional objectivity while being accessible"
             
             "\n\nLEGAL JARGON TRANSLATION RULES:"
             "\n• Replace 'herein' with 'in this document'"
@@ -236,18 +236,18 @@ class GeminiClient:
             "\n• Break down run-on sentences into digestible pieces"
             
             "\n\nQUALITY STANDARDS:"
-            "\n• Focus on practical impact: 'What does this mean for ME?'"
-            "\n• Use conversational tone while staying accurate"
+            "\n• Focus on practical impact and implications"
+            "\n• Use clear, professional tone while staying accessible"
             "\n• Always provide valid JSON that can be parsed programmatically"
             "\n• Never add facts not in the original text"
         )
         if include_negotiation_tips:
             base_prompt += (
-                "\n\n5. NEGOTIATION GUIDANCE: Provide enthusiastic, actionable tips for improving terms"
-                "\n• Be encouraging - 'You CAN negotiate this!'"
-                "\n• Be specific - suggest exact language changes when possible"
-                "\n• Be strategic - explain WHY a change matters"
-                "\n• Think like you're coaching them for success"
+                "\n\n5. NEGOTIATION GUIDANCE: Provide practical, actionable recommendations for improving terms"
+                "\n• Be constructive - suggest specific improvements where appropriate"
+                "\n• Be specific - recommend exact language changes when possible"
+                "\n• Be strategic - explain the reasoning behind suggested changes"
+                "\n• Focus on practical steps they can take"
             )
         return base_prompt
     
@@ -260,23 +260,52 @@ class GeminiClient:
             clauses_text += "===\n"
         output_format = {
             "id": "clause_0",
-            "summary": "ADVISOR-STYLE TRANSLATION: Explain what this really means in everyday language, with enthusiasm for protecting the reader",
-            "clause_category": "One of: Termination, Liability, Indemnity, Confidentiality, Payment, IP Ownership, Dispute Resolution, Governing Law, Assignment, Modification, Other",
+            "summary": "Clear explanation of what this clause means in everyday language, focusing on practical implications",
+            "clause_category": "One of: Termination, Liability, Indemnity, Confidentiality, Payment, IP Ownership, Dispute Resolution, Governing Law, Assignment, Modification, Warranties, Force Majeure, Definitions, Other",
             "risk_level": "One of: low, moderate, attention",
-            "negotiation_tip": "EMPOWERING tip: Specific, actionable advice for improving this clause (or null if not applicable)"
+            "negotiation_tip": "Specific, actionable advice for improving this clause (or null if not applicable)"
         }
         prompt = (
-            f"{clauses_text}\n\nYOUR MISSION: Transform each clause into friendly, protective advice!\n\n"
+            f"{clauses_text}\n\nYOUR OBJECTIVE: Transform each clause into clear, understandable guidance.\n\n"
             f"Return a JSON array with one object per clause using this exact format:\n"
             f"{json.dumps([output_format], indent=2)}"
-            "\n\nQUALITY CHECKLIST:"
+            "\n\nCATEGORY CLASSIFICATION GUIDELINES:"
+            "\n- Termination: Contract ending, breach, cancellation, expiration, notice requirements"
+            "\n- Liability: Damages, responsibility for losses, harm, limitation of liability"
+            "\n- Indemnity: Hold harmless, defend against claims, reimbursement, third-party protection"
+            "\n- Confidentiality: Non-disclosure, proprietary information, trade secrets, privacy"
+            "\n- Payment: Fees, costs, billing terms, invoice requirements, late payments"
+            "\n- IP Ownership: Intellectual property rights, copyrights, trademarks, work product ownership"
+            "\n- Dispute Resolution: Arbitration, mediation, court procedures, litigation, ADR"
+            "\n- Governing Law: Applicable jurisdiction, choice of law, venue, legal framework"
+            "\n- Assignment: Transfer of rights/obligations, delegation, subcontracting restrictions"
+            "\n- Modification: Contract amendments, changes, written consent requirements, waivers"
+            "\n- Warranties: Guarantees, representations, disclaimers, 'as-is' statements"
+            "\n- Force Majeure: Acts of God, uncontrollable events, performance excuses"
+            "\n- Definitions: Term definitions, meanings, interpretations, capitalized terms"
+            "\n- Other: Use only when clause doesn't clearly fit above categories"
+            "\n\nCATEGORIZATION EXAMPLES:"
+            "\n• 'This Agreement shall terminate immediately upon material breach' → Termination"
+            "\n• 'Party A shall indemnify Party B against third-party claims' → Indemnity"
+            "\n• 'All Confidential Information must remain private' → Confidentiality"
+            "\n• 'Payment is due within 30 days of invoice' → Payment"
+            "\n• 'All work product shall be owned by Company' → IP Ownership"
+            "\n• 'Any disputes shall be resolved by arbitration' → Dispute Resolution"
+            "\n• 'This Agreement is governed by California law' → Governing Law"
+            "\n• 'No assignment without prior written consent' → Assignment"
+            "\n• 'This Agreement may only be modified in writing' → Modification"
+            "\n• 'Company warrants the software will perform as described' → Warranties"
+            "\n• 'Performance excused due to acts of God' → Force Majeure"
+            "\n• 'Confidential Information means non-public data' → Definitions"
+            "\n\nQUALITY STANDARDS:"
             "\n- All strings are properly escaped for JSON"
-            "\n- Each clause gets exactly one result object"  
-            "\n- SUMMARY: Write like you're explaining to a friend what this clause REALLY means"
-            "\n- RISK LEVELS: 'low' = no worries, 'moderate' = worth understanding, 'attention' = RED FLAG!"
-            "\n- NEGOTIATION TIPS: Be specific and encouraging - give them actual words to use!"
-            "\n- Use active voice and conversational tone throughout"
-            "\n- Focus on practical impact: 'Here's what this means for YOU...'"
+            "\n- Each clause gets exactly one result object"
+            "\n- SUMMARY: Explain the clause clearly and objectively"
+            "\n- CATEGORY: Choose most specific category that fits the clause's primary purpose"
+            "\n- RISK LEVELS: 'low' = minimal concern, 'moderate' = worth understanding, 'attention' = requires attention"
+            "\n- NEGOTIATION TIPS: Provide specific, practical advice when applicable"
+            "\n- Use clear, professional language throughout"
+            "\n- Focus on practical implications and meaning"
             "\n- Must be valid, parseable JSON only"
         )
         return prompt
@@ -363,7 +392,7 @@ class GeminiClient:
         valid_categories = [
             "Termination", "Liability", "Indemnity", "Confidentiality",
             "Payment", "IP Ownership", "Dispute Resolution", "Governing Law",
-            "Assignment", "Modification", "Other"
+            "Assignment", "Modification", "Warranties", "Force Majeure", "Definitions", "Other"
         ]
         if validated["category"] not in valid_categories:
             validated["category"] = "Other"
@@ -467,36 +496,35 @@ class GeminiClient:
     
     def _build_qa_system_prompt(self) -> str:
         """Build system prompt for Q&A."""
-        return """You are an enthusiastic legal advisor who genuinely cares about helping people understand their contracts! 
-Think of yourself as a trusted friend with legal expertise who wants to protect and empower the person asking questions.
+        return """You are a professional legal advisor focused on helping people understand their contracts clearly and thoroughly.
 
-YOUR MISSION: Provide helpful, proactive advice that goes beyond just answering the question.
+YOUR OBJECTIVE: Provide comprehensive, accurate guidance that addresses the user's question and highlights relevant considerations.
 
-ADVISORY APPROACH:
-• Be PROACTIVE - if you see related risks or opportunities in the clauses, mention them!
-• Be PROTECTIVE - warn about potential issues they should be aware of
-• Be EMPOWERING - help them understand their rights and what they can do
-• Use conversational, friendly language while staying accurate
-• Think "What would I want my best friend to know about this?"
+COMMUNICATION APPROACH:
+• Be INFORMATIVE - provide clear, complete answers based on the available clauses
+• Be THOROUGH - identify related considerations and implications
+• Be HELPFUL - explain complex terms and concepts in accessible language
+• Use professional, clear language while remaining accessible
+• Focus on practical understanding and implications
 
 ANSWER GUIDELINES:
-• Base answers ONLY on the provided clauses - never hallucinate
-• If something isn't clearly specified, say "This document doesn't clearly address that, but here's what the related clauses suggest..."
+• Base answers ONLY on the provided clauses - never add information not present
+• If something isn't clearly specified, state "This document doesn't clearly address that aspect, but the related clauses indicate..."
 • Reference clauses in user-friendly format: "Clause 3 (Payment Terms)" instead of technical IDs
-• Use everyday language that anyone can understand
-• Be enthusiastic about helping them understand their rights
+• Use clear, professional language that is easy to understand
+• Focus on helping users understand their rights and obligations
 
 CLAUSE REFERENCING RULES:
 • Always use "Clause X (Category)" format when citing clauses
 • Examples: "Clause 1 (Terms)", "Clause 5 (Termination)", "Clause 8 (Payment)"
-• Never use technical clause IDs like "doc123_clause_5" - these confuse users
-• Make your references natural: "as stated in Clause 3 (Privacy)" 
+• Never use technical clause IDs like "doc123_clause_5" - these are not user-friendly
+• Make your references natural: "as outlined in Clause 3 (Privacy)" 
 
-PROACTIVE BONUS POINTS:
-• Point out related clauses they should also pay attention to
-• Mention if there are any red flags in nearby clauses
-• Suggest what questions they might want to ask the other party
-• Explain the practical implications of what you found
+COMPREHENSIVE GUIDANCE:
+• Identify related clauses that may be relevant to the question
+• Highlight important considerations or potential concerns
+• Explain practical implications of the relevant terms
+• Suggest areas where clarification might be beneficial
 
 Always output in strict JSON format only."""
     
@@ -516,28 +544,28 @@ Always output in strict JSON format only."""
             clauses_text += f"Original: {clause.get('original_text', '')[:500]}...\n\n"
         
         output_format = {
-            "answer": "ADVISOR-STYLE RESPONSE: Your enthusiastic, helpful answer based on the clauses, with proactive insights",
+            "answer": "Professional, clear response based on the clauses, including relevant considerations and implications",
             "used_clause_numbers": [1, 2],
             "confidence": 0.85,
-            "additional_insights": "Optional: Proactive warnings, related clause suggestions, or empowering tips"
+            "additional_insights": "Optional: Related considerations, important implications, or areas requiring attention"
         }
         
         return f"""{clauses_text}
 
 QUESTION: {question}
 
-YOUR ADVISOR MISSION: Answer their question AND provide helpful insights they might not have thought to ask about!
+YOUR OBJECTIVE: Provide a comprehensive answer that addresses the question and highlights relevant considerations.
 
 Return response in this exact JSON format:
 {json.dumps(output_format, indent=2)}
 
 RESPONSE GUIDELINES:
-• ANSWER: Be conversational and helpful - explain what the clauses say in everyday terms
+• ANSWER: Provide clear, professional guidance based on what the clauses state
 • CONFIDENCE: 0-1 based on how clearly the clauses answer the question
-• ADDITIONAL_INSIGHTS: Be proactive! Mention related risks, opportunities, or things they should know
-• Use enthusiastic, protective language that empowers them
-• Reference clauses as "Clause X (Category Name)" where X is the clause number - this is much more user-friendly than technical IDs
-• When citing clauses, use natural language like "as mentioned in Clause 3 (Termination)" instead of technical identifiers"""
+• ADDITIONAL_INSIGHTS: Include relevant considerations, implications, or important related information
+• Use clear, professional language that remains accessible
+• Reference clauses as "Clause X (Category Name)" where X is the clause number
+• When citing clauses, use natural language like "as outlined in Clause 3 (Termination)" """
     
     def _parse_qa_response(
         self, 
@@ -618,17 +646,15 @@ RESPONSE GUIDELINES:
             }
     
     def _enhance_advisor_language(self, text: str) -> str:
-        """Post-process text to enhance advisor-like language and enthusiasm."""
+        """Post-process text to improve clarity and professional tone."""
         if not text:
             return text
             
-        # Legal jargon translations
+        # Legal jargon translations for clarity
         jargon_translations = {
-            "this clause": "this clause (here's what this really means)",
             "the contract": "your contract",
             "the agreement": "your agreement", 
-            "you should": "I recommend you",
-            "it is important": "this is really important",
+            "you should": "it is recommended that you",
             "may result in": "could lead to",
             "pursuant to": "according to",
             "in the event that": "if",
@@ -652,35 +678,35 @@ RESPONSE GUIDELINES:
             "jurisdiction": "which court system handles disputes"
         }
         
-        # Advisor enhancements - make language more protective and empowering
-        advisor_enhancements = {
-            "this means": "Here's what this really means for you:",
-            "important": "IMPORTANT",
+        # Professional clarifications - remove overly casual tone
+        professional_clarifications = {
+            "this means": "This means:",
+            "important": "important",
             "risk": "potential risk",
-            "attention": "PAY ATTENTION",
-            "unlimited": "UNLIMITED (this is a big red flag!)",
-            "automatically": "automatically (heads up!)",
-            "perpetual": "forever (that's a long time!)",
-            "irrevocable": "can't be changed later",
+            "attention": "requires attention",
+            "unlimited": "unlimited",
+            "automatically": "automatically",
+            "perpetual": "perpetual",
+            "irrevocable": "cannot be changed later",
             "waive": "give up your right to",
             "hold harmless": "protect them from any costs",
-            "sole discretion": "they decide everything",
-            "reasonable": "fair and appropriate"
+            "sole discretion": "their complete discretion",
+            "reasonable": "reasonable"
         }
         
         enhanced_text = text
         
-        # Apply jargon translations first
+        # Apply jargon translations for clarity
         for legal_term, plain_language in jargon_translations.items():
             enhanced_text = enhanced_text.replace(legal_term, plain_language)
         
-        # Apply advisor enhancements
-        for term, enhanced_term in advisor_enhancements.items():
-            enhanced_text = enhanced_text.replace(term, enhanced_term)
+        # Apply professional clarifications
+        for term, clarified_term in professional_clarifications.items():
+            enhanced_text = enhanced_text.replace(term, clarified_term)
         
-        # Add encouraging phrases for negotiation tips
+        # Add professional guidance prefix for negotiation tips
         if "negotiate" in enhanced_text.lower() or "ask for" in enhanced_text.lower():
-            if not enhanced_text.startswith("TIP:"):
-                enhanced_text = f"TIP: {enhanced_text}"
+            if not enhanced_text.startswith("Recommendation:"):
+                enhanced_text = f"Recommendation: {enhanced_text}"
         
         return enhanced_text

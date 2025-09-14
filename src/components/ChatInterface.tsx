@@ -8,9 +8,6 @@ import {
   User,
   FileText,
   Trash2,
-  Copy,
-  ThumbsUp,
-  ThumbsDown,
   RotateCcw,
   AlertCircle,
   CheckCircle,
@@ -22,6 +19,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { useTranslations } from "next-intl";
 
 // Custom markdown component for chat messages
 const ChatMarkdown = ({ content }: { content: string }) => {
@@ -164,13 +162,13 @@ export const ChatInterface = ({
   placeholder = "Ask about clauses, risks, or request a plain-English summary…",
   disabled = false,
 }: ChatInterfaceProps) => {
+  const t = useTranslations();
   const [input, setInput] = useState("");
   const [isComposing, setIsComposing] = useState(false);
   const [showTypingHint, setShowTypingHint] = useState(false);
   const [typingTimer, setTypingTimer] = useState<NodeJS.Timeout | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -211,15 +209,6 @@ export const ChatInterface = ({
     }
   };
 
-  const handleCopy = async (messageId: string, content: string) => {
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopiedMessageId(messageId);
-      setTimeout(() => setCopiedMessageId(null), 2000);
-    } catch (error) {
-      console.error("Failed to copy text:", error);
-    }
-  };
 
   const formatTimestamp = (timestamp?: Date) => {
     if (!timestamp) return "";
@@ -237,7 +226,7 @@ export const ChatInterface = ({
         <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce delay-100" />
         <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce delay-200" />
       </div>
-      <span className="text-sm">Assistant is thinking...</span>
+      <span className="text-sm">{t('chat.assistantThinking')}</span>
     </div>
   );
 
@@ -272,12 +261,10 @@ export const ChatInterface = ({
             </div>
             <div className="space-y-2">
               <h3 className="text-xl font-semibold text-white">
-                Welcome to LegalEase AI
+                {t('chat.welcomeTitle')}
               </h3>
               <p className="text-white/60 max-w-md">
-                Upload a legal document and ask me anything. I&apos;ll provide
-                summaries, flag risky clauses, and answer your questions in
-                plain language.
+                {t('chat.welcomeDescription')}
               </p>
             </div>
             <Button
@@ -285,7 +272,7 @@ export const ChatInterface = ({
               className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600"
             >
               <FileText className="mr-2 h-4 w-4" />
-              Upload Document
+              {t('navigation.uploadDocument')}
             </Button>
           </div>
         )}
@@ -302,7 +289,7 @@ export const ChatInterface = ({
                         <div className="w-6 h-6 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
                           <Bot className="w-3 h-3 text-white" />
                         </div>
-                        <span className="text-sm font-medium">Assistant</span>
+                        <span className="text-sm font-medium">{t('chat.assistant')}</span>
                         {message.timestamp && (
                           <span className="text-xs text-white/40">
                             {formatTimestamp(message.timestamp)}
@@ -334,7 +321,7 @@ export const ChatInterface = ({
                       {message.sources && message.sources.length > 0 && (
                         <div className="mt-4 p-3 bg-[#0F0F0F] rounded-lg border border-white/10">
                           <div className="text-xs font-medium text-white/70 mb-2">
-                            Sources:
+                            {t('chat.sources')}
                           </div>
                           <div className="space-y-2">
                             {message.sources.map((source, idx) => (
@@ -368,20 +355,6 @@ export const ChatInterface = ({
                     {!message.isLoading && (
                       <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/5 opacity-0 group-hover:opacity-100 transition-opacity">
                         <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() =>
-                              handleCopy(message.id, message.content)
-                            }
-                            className="h-6 px-2 text-xs"
-                          >
-                            {copiedMessageId === message.id ? (
-                              <CheckCircle className="w-3 h-3" />
-                            ) : (
-                              <Copy className="w-3 h-3" />
-                            )}
-                          </Button>
 
                           {onRetryMessage && message.error && (
                             <Button
@@ -395,35 +368,6 @@ export const ChatInterface = ({
                           )}
                         </div>
 
-                        {/* Feedback buttons */}
-                        {onFeedback && !message.error && (
-                          <div className="flex items-center gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => onFeedback(message.id, "positive")}
-                              className={`h-6 px-2 text-xs ${
-                                message.feedback === "positive"
-                                  ? "text-green-400"
-                                  : "text-white/40 hover:text-green-400"
-                              }`}
-                            >
-                              <ThumbsUp className="w-3 h-3" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => onFeedback(message.id, "negative")}
-                              className={`h-6 px-2 text-xs ${
-                                message.feedback === "negative"
-                                  ? "text-red-400"
-                                  : "text-white/40 hover:text-red-400"
-                              }`}
-                            >
-                              <ThumbsDown className="w-3 h-3" />
-                            </Button>
-                          </div>
-                        )}
                       </div>
                     )}
                   </CardContent>
@@ -439,7 +383,7 @@ export const ChatInterface = ({
                           {formatTimestamp(message.timestamp)}
                         </span>
                       )}
-                      <span className="text-sm font-medium">You</span>
+                      <span className="text-sm font-medium">{t('chat.you')}</span>
                       <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-full flex items-center justify-center">
                         <User className="w-3 h-3 text-white" />
                       </div>
@@ -448,21 +392,6 @@ export const ChatInterface = ({
                       <ChatMarkdown content={message.content} />
                     </div>
 
-                    {/* Copy action for user messages */}
-                    <div className="flex justify-end mt-2 pt-2 border-t border-white/5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleCopy(message.id, message.content)}
-                        className="h-6 px-2 text-xs"
-                      >
-                        {copiedMessageId === message.id ? (
-                          <CheckCircle className="w-3 h-3" />
-                        ) : (
-                          <Copy className="w-3 h-3" />
-                        )}
-                      </Button>
-                    </div>
                   </CardContent>
                 </Card>
               </div>
@@ -493,7 +422,7 @@ export const ChatInterface = ({
             {selectedDocuments.length > 0 ? (
               <>
                 <span className="text-xs font-medium text-white/60 uppercase tracking-wide">
-                  Context:
+                  {t('chat.context')}
                 </span>
                 {selectedDocuments.map((doc) => (
                   <div
@@ -521,12 +450,12 @@ export const ChatInterface = ({
                   className="h-6 px-2 text-xs text-white/60 hover:text-white"
                 >
                   <Trash2 className="mr-1 h-3 w-3" />
-                  Clear
+                  {t('chat.clear')}
                 </Button>
               </>
             ) : (
               <div className="text-xs text-white/40">
-                No documents selected. Upload or choose from sidebar.
+                {t('chat.noDocumentsSelected')}
               </div>
             )}
           </div>
@@ -578,7 +507,7 @@ export const ChatInterface = ({
                     }
                   }}
                   onKeyDown={handleKeyDown}
-                  placeholder={disabled ? "Please wait..." : placeholder}
+                  placeholder={disabled ? t('chat.pleaseWait') : placeholder}
                   disabled={disabled}
                   className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-white/40 text-white max-h-[120px] leading-5"
                   style={{ minHeight: "20px" }}
@@ -611,7 +540,7 @@ export const ChatInterface = ({
           {showTypingHint && !disabled && (
             <div className="absolute -top-8 left-3 text-xs text-white/40 bg-[#0F0F0F] px-2 py-1 rounded border border-white/5 transition-opacity duration-200">
               <Clock className="w-3 h-3 inline mr-1" />
-              Press Enter to send, Shift+Enter for new line
+              {t('chat.typingHint')}
             </div>
           )}
         </div>

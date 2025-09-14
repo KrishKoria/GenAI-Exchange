@@ -11,22 +11,25 @@ import {
   Flame,
   BarChart3,
   X,
+  Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   useDocumentWorkflow,
   useDocumentWithClauses,
+  useMultipleDocumentsClauses,
   useCreateChatSession,
   useChatAwareAskQuestion,
   useUpdateDocumentContext,
+  useBatchDocumentUpload,
 } from "@/hooks/useDocuments";
-import { getTopRiskyClauses } from "@/lib/api";
 import { RiskHeatmap } from "@/components/RiskHeatmap";
 import { ChatInterface, ChatMessage } from "@/components/ChatInterface";
 import { UploadSuccessCard } from "@/components/UploadSuccessCard";
 import { ReadabilityPanel } from "@/components/ReadabilityPanel";
 import { LanguageSelector } from "@/components/LanguageSelector";
+import { QueueStatusPanel } from "@/components/QueueStatusPanel";
 import { useTranslations } from "next-intl";
 // Simple client-side file validation helpers
 const validateFileBasics = (file: File) => {
@@ -109,22 +112,43 @@ export const Dashboard = () => {
   const [autoDismissTimers, setAutoDismissTimers] = useState<{
     [key: string]: NodeJS.Timeout;
   }>({});
+  const [showQueuePanel, setShowQueuePanel] = useState(false);
 
   const { toast } = useToast();
 
   // API hooks
   const { upload: uploadDocument } = useDocumentWorkflow();
+  const batchUploadDocuments = useBatchDocumentUpload();
   const askQuestionMutation = useChatAwareAskQuestion();
   const createChatSessionMutation = useCreateChatSession();
-  const updateDocumentContextMutation = useUpdateDocumentContext(); // Use the composite hook for better data management
-  const { status: statusQuery, clauses: clausesQuery } =
+  const updateDocumentContextMutation = useUpdateDocumentContext();
+
+  // Keep single document hook for backward compatibility (status info, etc.)
+  const { status: statusQuery, clauses: singleClausesQuery } =
     useDocumentWithClauses(currentDocId);
 
+  // New multi-document hook for risk and readability analysis
+  const multiClausesQuery = useMultipleDocumentsClauses(selectedDocs);
+
   const documentStatus = statusQuery.data;
-  const clauses = useMemo(() => clausesQuery.data || [], [clausesQuery.data]);
-  const clausesLoading = clausesQuery.isLoading;
-  const clausesError = clausesQuery.error;
-  const clausesSuccess = clausesQuery.isSuccess;
+
+  // Use multi-document clauses for analysis, fall back to single document if only one selected
+  const clauses = useMemo(() => {
+    if (selectedDocs.length > 1) {
+      return multiClausesQuery.data || [];
+    } else {
+      return singleClausesQuery.data || [];
+    }
+  }, [selectedDocs.length, multiClausesQuery.data, singleClausesQuery.data]);
+
+  const clausesLoading =
+    selectedDocs.length > 1
+      ? multiClausesQuery.isLoading
+      : singleClausesQuery.isLoading;
+  const clausesError =
+    selectedDocs.length > 1
+      ? multiClausesQuery.error
+      : singleClausesQuery.error;
 
   const filteredDocs = recentDocs.filter((d) =>
     d.name.toLowerCase().includes(docQuery.toLowerCase())
@@ -137,30 +161,52 @@ export const Dashboard = () => {
   async function handleFilesSelected(files: FileList | null) {
     if (!files || files.length === 0) return;
 
-    const file = files[0];
-    const cardId = `upload-${Date.now()}`;
+    const filesArray = Array.from(files);
+    const sessionId = `session-${Date.now()}`;
 
-    try {
-      // Basic client-side validation
-      const basicValidation = validateFileBasics(file);
-      if (!basicValidation.isValid) {
-        toast(
-          createToast.error("Invalid File", basicValidation.errors.join(" "))
-        );
-        return;
-      }
+    // Validate all files first
+    const validationResults = filesArray.map((file) => ({
+      file,
+      validation: validateFileBasics(file),
+    }));
 
-      // Show warnings if any
-      if (basicValidation.warnings.length > 0) {
-        toast(
-          createToast.warning(
-            "File Upload Warning",
-            basicValidation.warnings.join(" ")
-          )
-        );
-      }
+    // Check if any files have validation errors
+    const invalidFiles = validationResults.filter(
+      (result) => !result.validation.isValid
+    );
+    if (invalidFiles.length > 0) {
+      const errorMessages = invalidFiles.map(
+        (result) => `${result.file.name}: ${result.validation.errors.join(" ")}`
+      );
+      toast(
+        createToast.error(
+          `Invalid File${invalidFiles.length > 1 ? "s" : ""}`,
+          errorMessages.join("\n")
+        )
+      );
+      return;
+    }
 
-      // Create upload card
+    // Show warnings for any files with warnings
+    const filesWithWarnings = validationResults.filter(
+      (result) => result.validation.warnings.length > 0
+    );
+    if (filesWithWarnings.length > 0) {
+      const warningMessages = filesWithWarnings.map(
+        (result) =>
+          `${result.file.name}: ${result.validation.warnings.join(" ")}`
+      );
+      toast(
+        createToast.warning(
+          `File Upload Warning${filesWithWarnings.length > 1 ? "s" : ""}`,
+          warningMessages.join("\n")
+        )
+      );
+    }
+
+    // Create upload cards for all files
+    const uploadCardIds = filesArray.map((file, index) => {
+      const cardId = `upload-${Date.now()}-${index}`;
       setUploadCards((prev) => ({
         ...prev,
         [cardId]: {
@@ -170,41 +216,135 @@ export const Dashboard = () => {
           progress: 25,
         },
       }));
+      return { cardId, file };
+    });
 
-      // Upload the document (server will validate page count)
-      const response = await uploadDocument.mutateAsync({
-        file,
-        sessionId: `session-${Date.now()}`,
-      });
+    try {
+      // Use batch upload for multiple files, single upload for one file
+      if (filesArray.length === 1) {
+        const file = filesArray[0];
+        const cardId = uploadCardIds[0].cardId;
 
-      // Add to recent docs
-      const newDoc = {
-        id: response.doc_id,
-        name: response.filename,
-        date: new Date().toISOString().slice(0, 10),
-        status: response.status,
-      };
+        const response = await uploadDocument.mutateAsync({
+          file,
+          sessionId,
+        });
 
-      setRecentDocs((prev) => [newDoc, ...prev]);
-      setSelectedDocs([response.doc_id]);
-      setCurrentDocId(response.doc_id);
+        // Add to recent docs and select
+        const newDoc = {
+          id: response.doc_id,
+          name: response.filename,
+          date: new Date().toISOString().slice(0, 10),
+          status: response.status,
+        };
 
-      // Update upload card to processing
-      setUploadCards((prev) => ({
-        ...prev,
-        [cardId]: {
-          ...prev[cardId],
-          status: "processing",
-          progress: 75,
-        },
-      }));
+        setRecentDocs((prev) => [newDoc, ...prev]);
+        setSelectedDocs([response.doc_id]);
+        setCurrentDocId(response.doc_id);
 
-      toast(
-        createToast.success(
-          "Upload Successful",
-          `${file.name} uploaded successfully and is being processed.`
-        )
-      );
+        // Update upload card
+        setUploadCards((prev) => ({
+          ...prev,
+          [cardId]: {
+            ...prev[cardId],
+            status: "processing",
+            progress: 75,
+          },
+        }));
+
+        toast(
+          createToast.success(
+            "Upload Successful",
+            `${file.name} uploaded successfully and is being processed.`
+          )
+        );
+      } else {
+        // Batch upload for multiple files
+        const response = await batchUploadDocuments.mutateAsync({
+          files: filesArray,
+          sessionId,
+        });
+
+        // Defensive check for response structure
+        if (
+          !response ||
+          !response.uploads ||
+          !Array.isArray(response.uploads)
+        ) {
+          console.error("Invalid batch upload response:", response);
+          throw new Error("Invalid response from batch upload");
+        }
+
+        // Process successful uploads
+        const newDocs = response.uploads
+          .filter((upload) => upload.status !== "failed")
+          .map((upload) => ({
+            id: upload.doc_id,
+            name: upload.filename,
+            date: new Date().toISOString().slice(0, 10),
+            status: upload.status,
+          }));
+
+        // Add all successful docs to recent docs
+        if (newDocs.length > 0) {
+          setRecentDocs((prev) => [...newDocs, ...prev]);
+          setSelectedDocs(newDocs.map((doc) => doc.id));
+          setCurrentDocId(newDocs[0].id);
+        }
+
+        // Update upload cards based on results
+        uploadCardIds.forEach(({ cardId, file }) => {
+          const uploadResult = response.uploads?.find(
+            (upload) => upload.filename === file.name
+          );
+
+          setUploadCards((prev) => ({
+            ...prev,
+            [cardId]: {
+              ...prev[cardId],
+              status:
+                uploadResult?.status === "failed" ? "failed" : "processing",
+              progress: uploadResult?.status === "failed" ? 0 : 75,
+              error:
+                uploadResult?.status === "failed"
+                  ? uploadResult.message
+                  : undefined,
+            },
+          }));
+        });
+
+        // Show batch upload results
+        toast(
+          createToast.success(
+            "Batch Upload Completed",
+            `${response.successful_count || 0}/${
+              response.total_count || filesArray.length
+            } files uploaded successfully. ${
+              (response.failed_count || 0) > 0
+                ? `${response.failed_count} files failed.`
+                : "All documents are being processed."
+            }`
+          )
+        );
+
+        // Show failed uploads if any
+        if ((response.failed_count || 0) > 0 && response.uploads) {
+          const failedUploads = response.uploads.filter(
+            (upload) => upload.status === "failed"
+          );
+          const failedMessages = failedUploads.map(
+            (upload) =>
+              `${upload.filename}: ${upload.message || "Unknown error"}`
+          );
+
+          toast(
+            createToast.error(
+              `Failed Upload${failedUploads.length > 1 ? "s" : ""}`,
+              failedMessages.join("\n")
+            )
+          );
+        }
+      }
     } catch (error: unknown) {
       console.error("Upload failed:", error);
 
@@ -213,20 +353,22 @@ export const Dashboard = () => {
       const errorMessage =
         errorResponse?.data?.detail ||
         (error as Error)?.message ||
-        "An unexpected error occurred while uploading your document.";
+        "An unexpected error occurred while uploading your documents.";
 
       const isValidationError =
         errorResponse?.status === 422 || errorResponse?.status === 413;
 
-      // Update upload card to failed
-      setUploadCards((prev) => ({
-        ...prev,
-        [cardId]: {
-          ...prev[cardId],
-          status: "failed",
-          error: errorMessage,
-        },
-      }));
+      // Update all upload cards to failed
+      uploadCardIds.forEach(({ cardId }) => {
+        setUploadCards((prev) => ({
+          ...prev,
+          [cardId]: {
+            ...prev[cardId],
+            status: "failed",
+            error: errorMessage,
+          },
+        }));
+      });
 
       toast(
         createToast.error(
@@ -269,8 +411,7 @@ export const Dashboard = () => {
         {
           id: "m-welcome",
           role: "assistant",
-          content:
-            "New chat session started. Upload a document or pick from Recent Docs, then ask your questions.",
+          content: t("chat.newChatStarted"),
           timestamp: new Date(),
         },
       ]);
@@ -284,8 +425,7 @@ export const Dashboard = () => {
         {
           id: "m-welcome",
           role: "assistant",
-          content:
-            "New chat started. Upload a document or pick from Recent Docs, then ask your questions.",
+          content: t("chat.newChatStarted"),
           timestamp: new Date(),
         },
       ]);
@@ -433,7 +573,6 @@ export const Dashboard = () => {
   }
 
   // Generate top risky clauses - memoized for performance
-  const topRiskyClauses = useMemo(() => getTopRiskyClauses(clauses), [clauses]);
 
   // Update current document when selection changes
   useEffect(() => {
@@ -610,6 +749,9 @@ export const Dashboard = () => {
             <Button variant="secondary" onClick={handleUploadClick}>
               <Upload className="mr-2 h-4 w-4" /> {t("navigation.upload")}
             </Button>
+            <Button variant="outline" onClick={() => setShowQueuePanel(true)}>
+              <Clock className="mr-2 h-4 w-4" /> Queue
+            </Button>
             <input
               ref={fileInputRef}
               type="file"
@@ -621,11 +763,11 @@ export const Dashboard = () => {
 
           <div className="flex flex-col min-h-0 flex-1">
             <label className="text-xs uppercase tracking-wide text-white/60 shrink-0">
-              Recent documents
+              {t("navigation.recentDocuments")}
             </label>
             <div className="mt-2 flex items-center gap-2 shrink-0">
               <Input
-                placeholder="Search documents"
+                placeholder={t("navigation.searchDocuments")}
                 value={docQuery}
                 onChange={(e) => setDocQuery(e.target.value)}
                 className="bg-[#0F0F0F] border-white/10"
@@ -641,7 +783,9 @@ export const Dashboard = () => {
 
             <div className="mt-3 overflow-y-auto no-scrollbar flex-1 pr-1 space-y-1">
               {filteredDocs.length === 0 && (
-                <div className="text-xs text-white/50">No documents found.</div>
+                <div className="text-xs text-white/50">
+                  {t("documents.noDocumentsFound")}
+                </div>
               )}
               {filteredDocs.map((doc) => {
                 const checked = selectedDocs.includes(doc.id);
@@ -649,24 +793,56 @@ export const Dashboard = () => {
                   <button
                     key={doc.id}
                     onClick={() => toggleSelectDoc(doc.id)}
-                    className={`group flex w-full items-center justify-between rounded-lg border border-white/5 bg-[#0F0F0F] px-3 py-2 text-left hover:border-white/20 ${
-                      checked ? "ring-1 ring-purple-500/50" : ""
+                    className={`group flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-all duration-200 transform ${
+                      checked
+                        ? "border-purple-500/70 bg-gradient-to-r from-purple-500/20 to-purple-600/10 ring-2 ring-purple-500/40 shadow-lg shadow-purple-500/20 scale-[1.02]"
+                        : "border-white/5 bg-[#0F0F0F] hover:border-white/20 hover:bg-white/5"
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <FileText className="h-4 w-4 text-white/70" />
+                      <FileText
+                        className={`h-4 w-4 transition-colors duration-200 ${
+                          checked ? "text-purple-400" : "text-white/70"
+                        }`}
+                      />
                       <div>
-                        <div className="text-sm leading-tight">{doc.name}</div>
-                        <div className="text-[10px] text-white/50">
+                        <div
+                          className={`text-sm leading-tight transition-colors duration-200 ${
+                            checked ? "text-white" : "text-white/90"
+                          }`}
+                        >
+                          {doc.name}
+                        </div>
+                        <div
+                          className={`text-[10px] transition-colors duration-200 ${
+                            checked ? "text-purple-200/80" : "text-white/50"
+                          }`}
+                        >
                           {doc.date} {doc.status && `• ${doc.status}`}
                         </div>
                       </div>
                     </div>
                     <div
-                      className={`h-3 w-3 rounded-full ${
-                        checked ? "bg-purple-500" : "bg-white/20"
+                      className={`relative h-4 w-4 rounded-full border-2 transition-all duration-200 ${
+                        checked
+                          ? "bg-purple-500 border-purple-400 shadow-md shadow-purple-500/50"
+                          : "bg-transparent border-white/30 group-hover:border-white/50"
                       }`}
-                    />
+                    >
+                      {checked && (
+                        <svg
+                          className="absolute inset-0 w-full h-full p-0.5 text-white"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      )}
+                    </div>
                   </button>
                 );
               })}
@@ -710,7 +886,7 @@ export const Dashboard = () => {
             disabled={!currentDocId}
           >
             <BarChart3 className="h-4 w-4 mr-2" />
-            Analysis
+            {t("navigation.analysis")}
           </Button>
         </div>
 
@@ -790,7 +966,7 @@ export const Dashboard = () => {
           {/* Panel Header with Close Button */}
           <div className="flex items-center justify-between mb-4 xl:hidden">
             <h2 className="text-lg font-semibold text-white">
-              Document Analysis
+              {t("analysis.title")}
             </h2>
             <Button
               variant="ghost"
@@ -801,26 +977,13 @@ export const Dashboard = () => {
             </Button>
           </div>
 
-          {/* Document info */}
-          {currentDocId && (
-            <div className="mb-4 p-3 rounded-lg bg-[#0F0F0F] border border-white/10 shrink-0">
-              <div className="text-xs text-white/60 mb-1">Active Document</div>
-              <div className="text-sm text-white/90 font-medium">
-                {recentDocs.find((d) => d.id === currentDocId)?.name ||
-                  "Loading..."}
-              </div>
-              <div className="text-xs text-white/50 mt-1">
-                {clauses.length} clauses analyzed
-              </div>
-            </div>
-          )}
-
           {/* Scrollable content area */}
           <div className="flex-1 overflow-y-auto no-scrollbar space-y-6 pr-2">
             {/* Risk Analysis Section */}
             <div>
               <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-white/70">
-                <Flame className="h-4 w-4 text-red-500" /> Risk Analysis
+                <Flame className="h-4 w-4 text-red-500" />{" "}
+                {t("analysis.riskAnalysis")}
               </h3>
 
               <div className="space-y-4">
@@ -830,49 +993,6 @@ export const Dashboard = () => {
                   isLoading={clausesLoading}
                   error={clausesError}
                 />
-
-                {/* Top risky clauses */}
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-white/60 mb-2">
-                    High-Risk Clauses ({topRiskyClauses.length})
-                  </div>
-                  <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {clausesLoading ? (
-                      <div className="space-y-2">
-                        {[...Array(3)].map((_, i) => (
-                          <div key={i} className="animate-pulse">
-                            <div className="h-8 bg-gray-700 rounded-lg"></div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : clausesError ? (
-                      <div className="text-xs text-red-400 p-3 rounded bg-red-500/10">
-                        Failed to load clause analysis. Please refresh or try
-                        again.
-                      </div>
-                    ) : topRiskyClauses.length > 0 ? (
-                      topRiskyClauses.map((c, index) => (
-                        <div
-                          key={c.clauseId || `${c.k}-${index}`}
-                          className="flex items-center justify-between rounded-lg border border-white/10 bg-[#0F0F0F] px-3 py-2 hover:border-white/20 transition-colors"
-                        >
-                          <div className="text-sm truncate">{c.k}</div>
-                          <div className="text-xs text-white/60 ml-2">
-                            {Math.round(c.risk * 100)}%
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-xs text-white/50 p-3">
-                        {currentDocId && clausesSuccess && clauses.length === 0
-                          ? "No clauses found in document"
-                          : currentDocId
-                          ? "No high-risk clauses found"
-                          : "Upload a document to see risk analysis"}
-                      </div>
-                    )}
-                  </div>
-                </div>
               </div>
             </div>
 
@@ -887,6 +1007,12 @@ export const Dashboard = () => {
           </div>
         </div>
       </aside>
+
+      {/* Queue Status Panel */}
+      <QueueStatusPanel
+        isVisible={showQueuePanel}
+        onClose={() => setShowQueuePanel(false)}
+      />
     </div>
   );
 };

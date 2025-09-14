@@ -148,6 +148,69 @@ export interface AnswerResponse {
   answer: string;
   used_clause_ids: string[];
   used_clause_numbers?: number[];
+  sources: SourceCitation[];
+  confidence: number;
+  response_time_ms?: number;
+  token_usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+  additional_insights?: string;
+}
+
+// Batch Processing Types
+export interface BatchUploadResponse {
+  uploads: DocumentUploadResponse[];
+  successful_count: number;
+  failed_count: number;
+  total_count: number;
+}
+
+export interface QueueItem {
+  doc_id: string;
+  filename: string;
+  file_size: number;
+  mime_type: string;
+  session_id?: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  processing_time?: number;
+  wait_time: number;
+  progress: number;
+  error_message?: string;
+}
+
+export interface QueueStatus {
+  total_items: number;
+  queued_items: number;
+  processing_items: number;
+  completed_items: number;
+  failed_items: number;
+  max_concurrent: number;
+  avg_processing_time?: number;
+  estimated_wait_time?: number;
+}
+
+export interface QueueStatusResponse {
+  queue_status: QueueStatus;
+}
+
+export interface QueueItemsResponse {
+  queue_items: QueueItem[];
+}
+
+export interface QueueItemResponse {
+  queue_item: QueueItem;
+}
+
+// Q&A Response Extended
+export interface AnswerResponseExtended {
+  answer: string;
+  used_clause_ids: string[];
+  used_clause_numbers?: number[];
   confidence: number;
   sources: SourceCitation[];
   timestamp: string;
@@ -288,6 +351,70 @@ export const documentApi = {
   ): Promise<ClauseDetail> {
     const response: AxiosResponse<ClauseDetail> = await apiClient.get(
       `/api/v1/documents/clause/${clauseId}?doc_id=${docId}`
+    );
+
+    return response.data;
+  },
+
+  /**
+   * Upload multiple documents for batch processing
+   */
+  async batchUploadDocuments(
+    files: File[],
+    sessionId?: string
+  ): Promise<BatchUploadResponse> {
+    const formData = new FormData();
+
+    files.forEach((file) => {
+      formData.append("files", file);
+    });
+
+    if (sessionId) {
+      formData.append("session_id", sessionId);
+    }
+
+    const response: AxiosResponse<BatchUploadResponse> = await apiClient.post(
+      "/api/v1/documents/ingest/batch",
+      formData,
+      {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+        timeout: 300000, // 5 minutes for batch upload
+      }
+    );
+
+    return response.data;
+  },
+
+  /**
+   * Get current queue status
+   */
+  async getQueueStatus(): Promise<QueueStatusResponse> {
+    const response: AxiosResponse<QueueStatusResponse> = await apiClient.get(
+      "/api/v1/documents/queue/status"
+    );
+
+    return response.data;
+  },
+
+  /**
+   * Get all items in the queue
+   */
+  async getQueueItems(): Promise<QueueItemsResponse> {
+    const response: AxiosResponse<QueueItemsResponse> = await apiClient.get(
+      "/api/v1/documents/queue/items"
+    );
+
+    return response.data;
+  },
+
+  /**
+   * Cancel a queued document processing
+   */
+  async cancelQueueItem(docId: string): Promise<QueueItemResponse> {
+    const response: AxiosResponse<QueueItemResponse> = await apiClient.delete(
+      `/api/v1/documents/queue/cancel/${docId}`
     );
 
     return response.data;

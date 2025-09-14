@@ -7,10 +7,14 @@
     "newChat": "New Chat",
     "upload": "Upload",
     "uploadDocument": "Upload Document",
-    "selectFiles": "Select files"
+    "selectFiles": "Select files",
+    "recentDocuments": "Recent documents",
+    "searchDocuments": "Search documents",
+    "analysis": "Analysis"
   },
   "chat": {
     "welcomeMessage": "Hi! Upload a legal document and ask me anything. I'll summarize, flag risky clauses, and answer questions in simple language.",
+    "welcomeDescription": "Upload a legal document and ask me anything. I'll provide summaries, flag risky clauses, and answer your questions in plain language.",
     "placeholder": "Ask about clauses, risks, or request a plain-English summary…",
     "welcomeTitle": "Welcome to LegalEase AI",
     "send": "Send",
@@ -20,7 +24,22 @@
     "documentProcessingFailed": "Document processing failed. Please try uploading again or contact support if the issue persists.",
     "uploadFailed": "Upload Failed",
     "documentValidationFailed": "Document Validation Failed",
-    "retry": "Retry"
+    "retry": "Retry",
+    "assistant": "Assistant",
+    "you": "You",
+    "assistantThinking": "Assistant is thinking...",
+    "context": "Context:",
+    "clear": "Clear",
+    "noDocumentsSelected": "No documents selected. Upload or choose from sidebar.",
+    "pleaseWait": "Please wait...",
+    "typingHint": "Press Enter to send, Shift+Enter for new line",
+    "newChatStarted": "New chat session started. Upload a document or pick from Recent Docs, then ask your questions.",
+    "sources": "Sources:",
+    "extractingClauses": "Extracting clauses, analyzing risks, and calculating readability scores..."
+  },
+  "documents": {
+    "noDocumentsFound": "No documents found.",
+    "clausesAnalyzed": "{count} clauses analyzed"
   },
   "analysis": {
     "title": "Document Analysis",
@@ -29,13 +48,104 @@
     "highRiskClauses": "High-Risk Clauses ({count})",
     "readabilityAnalysis": "Readability Analysis",
     "uploadForAnalysis": "Upload a document to see risk analysis",
-    "documentComplexity": "Document complexity is above high school level"
+    "documentComplexity": "Document complexity is above high school level",
+    "totalClauses": "Total Clauses",
+    "highRisk": "High Risk",
+    "moderateRisk": "Moderate Risk",
+    "lowRisk": "Low Risk",
+    "needsAttention": "Needs Attention",
+    "failedToLoad": "Failed to load risk analysis",
+    "refreshToTry": "Please refresh or try again",
+    "noClauseData": "No clause data available"
   },
   "riskLevels": {
     "low": "Low Risk",
     "moderate": "Moderate Risk",
-    "attention": "High Risk",
+    "attention": "Needs Attention",
     "riskLevelsTitle": "Risk Levels"
+  },
+  "readability": {
+    "title": "Readability Analysis",
+    "averageGrade": "Average Grade",
+    "fleschScore": "Flesch Score",
+    "difficultyDistribution": "Difficulty Distribution",
+    "readabilityInsights": "Readability Insights",
+    "uploadForReadability": "Upload a document to see readability analysis",
+    "failedToLoad": "Failed to load readability analysis. Please refresh to try again.",
+    "levels": {
+      "excellent": "Excellent",
+      "good": "Good",
+      "fair": "Fair",
+      "difficult": "Difficult",
+      "veryDifficult": "Very Difficult"
+    },
+    "fleschDescriptions": {
+      "veryEasy": "Very Easy",
+      "easy": "Easy",
+      "fairlyEasy": "Fairly Easy",
+      "standard": "Standard",
+      "fairlyDifficult": "Fairly Difficult",
+      "difficult": "Difficult",
+      "veryDifficult": "Very Difficult"
+    },
+    "difficultyLabels": {
+      "easy": "Easy",
+      "moderate": "Moderate",
+      "difficult": "Difficult",
+      "veryHard": "Very Hard",
+      "highlyDifficult": "Highly Difficult",
+      "veryDifficult": "Very Difficult"
+    },
+    "insights": {
+      "graduateLevel": "Document requires graduate-level reading ability",
+      "aboveHighSchool": "Document complexity is above high school level",
+      "graduateClauses": "{count} clauses require graduate-level comprehension",
+      "veryDifficultText": "Text is very difficult to read - consider seeking expert advice",
+      "challengingForGeneral": "Document is challenging for general readers",
+      "mostAccessible": "Most clauses are reasonably accessible to read"
+    },
+    "understandingMetrics": "Understanding Readability Metrics",
+    "gradeLevel": {
+      "title": "Grade Level Score",
+      "explanation": "Indicates the education level needed to understand the text. Based on average sentence length and word complexity.",
+      "elementary": "Elementary/Middle School - Most people can understand",
+      "highSchool": "High School/Business Level - Requires focused attention",
+      "college": "College Level - Requires careful reading and analysis",
+      "graduate": "Graduate Level - Complex legal/technical language"
+    },
+    "fleschScale": {
+      "title": "Flesch Reading Ease",
+      "explanation": "Measures text difficulty from 0-100. Higher scores indicate easier reading.",
+      "veryEasy": "Very Easy to read",
+      "standard": "Standard difficulty",
+      "difficult": "Difficult - requires concentration",
+      "veryDifficult": "Very Difficult - may need expert help"
+    },
+    "legalContext": {
+      "title": "Legal Document Context",
+      "explanation": "Legal documents are typically more complex than general text. Here's what different readability levels mean:",
+      "averagePerson": "Average Person (Grade 8-12)",
+      "averagePersonExplanation": "May struggle with grades above 12, should seek clarification for important clauses",
+      "businessProfessional": "Business Professional (Grade 12-16)",
+      "businessProfessionalExplanation": "Can handle most contract language but may need help with specialized terms",
+      "legalProfessional": "Legal Professional (Grade 16+)",
+      "legalProfessionalExplanation": "Comfortable with complex legal terminology and concepts"
+    },
+    "recommendations": {
+      "title": "Recommendations",
+      "graduateLevel": "Consider seeking legal review due to high complexity (Grade 16+)",
+      "collegeLevel": "Document requires careful reading and attention to detail",
+      "accessible": "Document is relatively accessible for most readers",
+      "complexClauses": "Pay special attention to {count} highly complex clauses",
+      "veryDifficult": "Consider professional legal assistance for understanding",
+      "mixedComplexity": "Document has mixed complexity - focus extra attention on difficult sections"
+    },
+    "explanations": {
+      "fleschKincaid": "The Flesch-Kincaid Grade Level indicates the U.S. school grade level needed to understand the text. For example, a score of 10.4 means a 10th-grade reading level.",
+      "fleschScore": "The Flesch Reading Ease score rates text on a 100-point scale. Higher scores indicate easier reading, with 90-100 being very easy and 0-30 being very difficult.",
+      "gradeLevel": "Grade Level measures the formal education level required to comprehend the text. Scores above 13 indicate college-level complexity.",
+      "difficulty": "Reading difficulty is determined by sentence length and syllable complexity. Complex legal language often results in higher difficulty scores."
+    }
   },
   "status": {
     "uploaded": "Uploaded",
