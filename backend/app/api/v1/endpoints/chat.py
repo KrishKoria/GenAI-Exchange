@@ -23,6 +23,7 @@ from app.models.chat import (
     ChatAnswerResponse,
     MessageRole
 )
+from app.models.document import SupportedLanguage
 from app.services.chat_session_service import ChatSessionService
 from app.services.firestore_client import FirestoreClient, FirestoreError
 from app.services.embeddings_service import EmbeddingsService, EmbeddingsError
@@ -233,6 +234,7 @@ async def add_message_to_session(
 async def ask_question_with_memory(
     session_id: str,
     request: ChatQuestionRequest,
+    language: SupportedLanguage = SupportedLanguage.ENGLISH,
     settings: Settings = Depends(get_settings),
     chat_service: ChatSessionService = Depends(get_chat_session_service),
     firestore_client: FirestoreClient = Depends(get_firestore_client),
@@ -375,7 +377,8 @@ async def ask_question_with_memory(
         qa_result = await gemini_client.answer_question(
             question=enhanced_question,
             relevant_clauses=all_relevant_clauses,
-            doc_id=session.selected_documents[0].doc_id  # Use first document ID for compatibility
+            doc_id=session.selected_documents[0].doc_id,  # Use first document ID for compatibility
+            language=language
         )
         
         # 7. Build source citations

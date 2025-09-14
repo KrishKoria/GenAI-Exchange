@@ -20,7 +20,8 @@ from app.models.document import (
     ClauseSummary,
     ClauseDetail,
     RiskLevel,
-    ReadabilityMetrics
+    ReadabilityMetrics,
+    SupportedLanguage
 )
 from app.services.document_orchestrator import DocumentOrchestrator
 from app.dependencies.services import get_document_orchestrator
@@ -77,13 +78,14 @@ async def process_document_background(
     filename: str,
     mime_type: str,
     orchestrator: DocumentOrchestrator,
+    language: SupportedLanguage = SupportedLanguage.ENGLISH,
     session_id: Optional[str] = None
 ):
     """Background task to process document."""
     try:
         logger.info(f"Starting background processing for document {doc_id}")
         result = await orchestrator.process_document_complete(
-            doc_id, file_content, filename, mime_type, session_id
+            doc_id, file_content, filename, mime_type, session_id, language
         )
         logger.info(f"Background processing completed successfully for {doc_id}")
         return result
@@ -105,21 +107,23 @@ async def process_document_background(
 async def ingest_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    language: SupportedLanguage = Form(SupportedLanguage.ENGLISH),
     session_id: Optional[str] = Form(None),
     settings: Settings = Depends(get_settings),
     orchestrator: DocumentOrchestrator = Depends(get_document_orchestrator)
 ) -> DocumentUploadResponse:
     """
     Ingest a legal document for processing.
-    
+
     Args:
         background_tasks: FastAPI background tasks
         file: PDF or DOCX file to process
+        language: Language for document analysis (default: English)
         session_id: Optional session ID for tracking
-        
+
     Returns:
         Document ID and processing status
-        
+
     Raises:
         HTTPException: If file validation fails
     """
@@ -156,7 +160,7 @@ async def ingest_document(
     try:
         # Create document record immediately to avoid race conditions
         await orchestrator.firestore_client.create_document(
-            doc_id, file.filename, len(file_content), page_count, session_id
+            doc_id, file.filename, len(file_content), page_count, session_id, language
         )
         
         # Start background processing
@@ -167,6 +171,7 @@ async def ingest_document(
             file.filename,
             file.content_type,
             orchestrator,
+            language,
             session_id
         )
         
@@ -176,6 +181,7 @@ async def ingest_document(
             doc_id=doc_id,
             filename=file.filename,
             status=DocumentStatus.PROCESSING,
+            language=language,
             message="Document uploaded and queued for processing"
         )
         
@@ -191,6 +197,7 @@ async def ingest_document(
 async def ingest_documents_batch(
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
+    language: SupportedLanguage = Form(SupportedLanguage.ENGLISH),
     session_id: Optional[str] = Form(None),
     max_concurrent: Optional[int] = Form(3),
     settings: Settings = Depends(get_settings),
@@ -246,6 +253,7 @@ async def ingest_documents_batch(
                     doc_id="",
                     filename="unknown",
                     status=DocumentStatus.FAILED,
+                    language=language,
                     message="No filename provided"
                 ))
                 continue
@@ -257,6 +265,7 @@ async def ingest_documents_batch(
                     doc_id="",
                     filename=file.filename,
                     status=DocumentStatus.FAILED,
+                    language=language,
                     message=f"File too large. Maximum size: {settings.MAX_FILE_SIZE_MB}MB"
                 ))
                 continue
@@ -268,6 +277,7 @@ async def ingest_documents_batch(
                     doc_id="",
                     filename=file.filename,
                     status=DocumentStatus.FAILED,
+                    language=language,
                     message="Only PDF and DOCX files are supported"
                 ))
                 continue
@@ -282,6 +292,7 @@ async def ingest_documents_batch(
                         doc_id="",
                         filename=file.filename,
                         status=DocumentStatus.FAILED,
+                        language=language,
                         message=e.detail
                     ))
                     continue
@@ -292,7 +303,7 @@ async def ingest_documents_batch(
             try:
                 # Create document record immediately to avoid race conditions
                 await orchestrator.firestore_client.create_document(
-                    doc_id, file.filename, len(file_content), page_count, session_id
+                    doc_id, file.filename, len(file_content), page_count, session_id, language
                 )
                 
                 # Add to queue for processing
@@ -313,6 +324,7 @@ async def ingest_documents_batch(
                     file.filename,
                     file.content_type,
                     orchestrator,
+                    language,
                     session_id
                 )
                 
@@ -320,6 +332,7 @@ async def ingest_documents_batch(
                     doc_id=doc_id,
                     filename=file.filename,
                     status=DocumentStatus.PROCESSING,
+                    language=language,
                     message="Document uploaded and queued for processing"
                 ))
                 
@@ -331,6 +344,7 @@ async def ingest_documents_batch(
                     doc_id="",
                     filename=file.filename,
                     status=DocumentStatus.FAILED,
+                    language=language,
                     message=f"Failed to create document record: {str(e)}"
                 ))
                 
@@ -340,6 +354,7 @@ async def ingest_documents_batch(
                 doc_id="",
                 filename=file.filename or "unknown",
                 status=DocumentStatus.FAILED,
+                language=language,
                 message=f"Unexpected error: {str(e)}"
             ))
     
@@ -510,6 +525,7 @@ async def get_document_status(
 @router.get("/clauses", response_model=List[ClauseSummary])
 async def get_document_clauses(
     doc_id: str,
+    language: Optional[SupportedLanguage] = None,
     settings: Settings = Depends(get_settings),
     orchestrator: DocumentOrchestrator = Depends(get_document_orchestrator)
 ) -> List[ClauseSummary]:
@@ -549,6 +565,7 @@ async def get_document_clauses(
                 category=clause_data.get("category", "Other"),
                 risk_level=clause_data.get("risk_level", "moderate"),
                 summary=clause_data.get("summary", ""),
+                language=language or clause_data.get("language", SupportedLanguage.ENGLISH),
                 readability_metrics=ReadabilityMetrics(
                     original_grade=readability_metrics_data.get("original_grade", 0.0),
                     summary_grade=readability_metrics_data.get("summary_grade", 0.0),
@@ -575,6 +592,7 @@ async def get_document_clauses(
 async def get_clause_detail(
     clause_id: str,
     doc_id: str,
+    language: Optional[SupportedLanguage] = None,
     settings: Settings = Depends(get_settings),
     orchestrator: DocumentOrchestrator = Depends(get_document_orchestrator)
 ) -> ClauseDetail:
@@ -610,6 +628,7 @@ async def get_clause_detail(
             risk_level=clause_data.get("risk_level", "moderate"),
             original_text=clause_data.get("original_text", ""),
             summary=clause_data.get("summary", ""),
+            language=language or clause_data.get("language", SupportedLanguage.ENGLISH),
             readability_metrics=ReadabilityMetrics(
                 original_grade=readability_metrics_data.get("original_grade", 0.0),
                 summary_grade=readability_metrics_data.get("summary_grade", 0.0),

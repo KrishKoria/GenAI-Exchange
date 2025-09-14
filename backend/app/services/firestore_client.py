@@ -62,12 +62,13 @@ class FirestoreClient:
     # Document Operations
     
     async def create_document(
-        self, 
-        doc_id: str, 
-        filename: str, 
+        self,
+        doc_id: str,
+        filename: str,
         file_size: int,
         page_count: int,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        language: Optional[str] = "en"
     ) -> Dict[str, Any]:
         """
         Create a new document record.
@@ -91,6 +92,7 @@ class FirestoreClient:
                 "file_size": file_size,
                 "page_count": page_count,
                 "status": DocumentStatus.PROCESSING.value,
+                "language": language,
                 "created_at": firestore.SERVER_TIMESTAMP,
                 "updated_at": firestore.SERVER_TIMESTAMP,
                 "processed_at": None,

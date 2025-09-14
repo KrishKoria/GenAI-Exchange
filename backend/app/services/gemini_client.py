@@ -13,6 +13,7 @@ from google.api_core.exceptions import GoogleAPIError
 from app.core.config import get_settings
 from app.core.logging import get_logger, LogContext, log_execution_time
 from app.services.clause_segmenter import ClauseCandidate
+from app.models.document import SupportedLanguage
 
 logger = get_logger(__name__)
 
@@ -71,9 +72,10 @@ class GeminiClient:
             raise GeminiError(f"GenAI client initialization failed: {e}")
 
     async def batch_summarize_clauses(
-        self, 
+        self,
         clauses: List[ClauseCandidate],
-        include_negotiation_tips: bool = True
+        include_negotiation_tips: bool = True,
+        language: SupportedLanguage = SupportedLanguage.ENGLISH
     ) -> List[Dict[str, Any]]:
         """Batch summarize clauses using Gemini with structured JSON output and parallel processing."""
         await self.initialize()
@@ -450,19 +452,21 @@ class GeminiClient:
         return batches
     
     async def answer_question(
-        self, 
-        question: str, 
+        self,
+        question: str,
         relevant_clauses: List[Dict[str, Any]],
-        doc_id: str
+        doc_id: str,
+        language: SupportedLanguage = SupportedLanguage.ENGLISH
     ) -> Dict[str, Any]:
         """
         Answer a question using relevant clauses with grounded prompting.
-        
+
         Args:
             question: User question
             relevant_clauses: List of relevant clause data
             doc_id: Document ID for context
-            
+            language: Language for the response (default: English)
+
         Returns:
             Structured answer with citations
         """
@@ -473,8 +477,8 @@ class GeminiClient:
             
             try:
                 # Build Q&A prompt
-                system_prompt = self._build_qa_system_prompt()
-                user_prompt = self._build_qa_user_prompt(question, relevant_clauses)
+                system_prompt = self._build_qa_system_prompt(language)
+                user_prompt = self._build_qa_user_prompt(question, relevant_clauses, language)
                 
                 # Generate response
                 response = await self._generate_content(system_prompt, user_prompt)
@@ -494,11 +498,41 @@ class GeminiClient:
                     "error": str(e)
                 }
     
-    def _build_qa_system_prompt(self) -> str:
-        """Build system prompt for Q&A."""
-        return """You are a professional legal advisor focused on helping people understand their contracts clearly and thoroughly.
+    def _build_qa_system_prompt(self, language: SupportedLanguage = SupportedLanguage.ENGLISH) -> str:
+        """Build system prompt for Q&A with language support."""
+
+        # Language-specific instructions
+        language_instructions = {
+            SupportedLanguage.ENGLISH: {
+                "role": "You are a professional legal advisor focused on helping people understand their contracts clearly and thoroughly.",
+                "language_note": "Respond in clear, professional English.",
+                "example_ref": '"Clause 3 (Payment Terms)"',
+                "not_specified": '"This document doesn\'t clearly address that aspect, but the related clauses indicate..."'
+            },
+            SupportedLanguage.HINDI: {
+                "role": "आप एक पेशेवर कानूनी सलाहकार हैं जो लोगों को उनके अनुबंधों को स्पष्ट और संपूर्ण रूप से समझने में मदद करने पर केंद्रित हैं।",
+                "language_note": "हिंदी में स्पष्ट, पेशेवर उत्तर दें। कानूनी शब्दावली के लिए अंग्रेजी शब्दों का उपयोग करें लेकिन स्पष्टीकरण हिंदी में दें।",
+                "example_ref": '"खंड 3 (भुगतान की शर्तें / Payment Terms)"',
+                "not_specified": '"यह दस्तावेज़ इस पहलू को स्पष्ट रूप से संबोधित नहीं करता, लेकिन संबंधित खंड इंगित करते हैं..."'
+            },
+            SupportedLanguage.BENGALI: {
+                "role": "আপনি একজন পেশাদার আইনি পরামর্শদাতা যিনি মানুষকে তাদের চুক্তিগুলি স্পষ্ট এবং সম্পূর্ণভাবে বুঝতে সাহায্য করার উপর দৃষ্টি নিবদ্ধ করেন।",
+                "language_note": "বাংলায় স্পষ্ট, পেশাদার উত্তর দিন। আইনি পরিভাষার জন্য ইংরেজি শব্দ ব্যবহার করুন কিন্তু ব্যাখ্যা বাংলায় দিন।",
+                "example_ref": '"ধারা ৩ (পেমেন্টের শর্তাবলী / Payment Terms)"',
+                "not_specified": '"এই নথিটি এই দিকটি স্পষ্টভাবে সম্বোধন করে না, তবে সংশ্লিষ্ট ধারাগুলি নির্দেশ করে..."'
+            }
+        }
+
+        lang_config = language_instructions.get(language, language_instructions[SupportedLanguage.ENGLISH])
+
+        return f"""{lang_config["role"]}
 
 YOUR OBJECTIVE: Provide comprehensive, accurate guidance that addresses the user's question and highlights relevant considerations.
+
+LANGUAGE REQUIREMENTS:
+• {lang_config["language_note"]}
+• Keep legal terms in English but provide explanations in the target language
+• Use hybrid approach: English legal terminology + native language explanations
 
 COMMUNICATION APPROACH:
 • Be INFORMATIVE - provide clear, complete answers based on the available clauses
@@ -509,8 +543,8 @@ COMMUNICATION APPROACH:
 
 ANSWER GUIDELINES:
 • Base answers ONLY on the provided clauses - never add information not present
-• If something isn't clearly specified, state "This document doesn't clearly address that aspect, but the related clauses indicate..."
-• Reference clauses in user-friendly format: "Clause 3 (Payment Terms)" instead of technical IDs
+• If something isn't clearly specified, state {lang_config["not_specified"]}
+• Reference clauses in user-friendly format: {lang_config["example_ref"]} instead of technical IDs
 • Use clear, professional language that is easy to understand
 • Focus on helping users understand their rights and obligations
 
@@ -518,7 +552,7 @@ CLAUSE REFERENCING RULES:
 • Always use "Clause X (Category)" format when citing clauses
 • Examples: "Clause 1 (Terms)", "Clause 5 (Termination)", "Clause 8 (Payment)"
 • Never use technical clause IDs like "doc123_clause_5" - these are not user-friendly
-• Make your references natural: "as outlined in Clause 3 (Privacy)" 
+• Make your references natural: "as outlined in Clause 3 (Privacy)"
 
 COMPREHENSIVE GUIDANCE:
 • Identify related clauses that may be relevant to the question
@@ -529,12 +563,13 @@ COMPREHENSIVE GUIDANCE:
 Always output in strict JSON format only."""
     
     def _build_qa_user_prompt(
-        self, 
-        question: str, 
-        relevant_clauses: List[Dict[str, Any]]
+        self,
+        question: str,
+        relevant_clauses: List[Dict[str, Any]],
+        language: SupportedLanguage = SupportedLanguage.ENGLISH
     ) -> str:
-        """Build user prompt for Q&A."""
-        
+        """Build user prompt for Q&A with language support."""
+
         clauses_text = "CLAUSES:\n"
         for i, clause in enumerate(relevant_clauses):
             clause_order = clause.get('order', i + 1)
@@ -542,19 +577,39 @@ Always output in strict JSON format only."""
             clauses_text += f"Clause {clause_order} ({clause_category}):\n"
             clauses_text += f"Summary: {clause.get('summary', '')}\n"
             clauses_text += f"Original: {clause.get('original_text', '')[:500]}...\n\n"
-        
+
+        # Language-specific response format examples
+        language_examples = {
+            SupportedLanguage.ENGLISH: {
+                "answer": "Professional, clear response based on the clauses, including relevant considerations and implications",
+                "additional_insights": "Optional: Related considerations, important implications, or areas requiring attention"
+            },
+            SupportedLanguage.HINDI: {
+                "answer": "खंडों के आधार पर पेशेवर, स्पष्ट उत्तर, संबंधित विचार और निहितार्थों सहित",
+                "additional_insights": "वैकल्पिक: संबंधित विचार, महत्वपूर्ण निहितार्थ, या ध्यान देने की आवश्यकता वाले क्षेत्र"
+            },
+            SupportedLanguage.BENGALI: {
+                "answer": "ধারাগুলির উপর ভিত্তি করে পেশাদার, স্পষ্ট প্রতিক্রিয়া, প্রাসঙ্গিক বিবেচনা এবং প্রভাব সহ",
+                "additional_insights": "ঐচ্ছিক: সম্পর্কিত বিবেচনা, গুরুত্বপূর্ণ প্রভাব, বা মনোযোগের প্রয়োজনীয় এলাকা"
+            }
+        }
+
+        lang_example = language_examples.get(language, language_examples[SupportedLanguage.ENGLISH])
+
         output_format = {
-            "answer": "Professional, clear response based on the clauses, including relevant considerations and implications",
+            "answer": lang_example["answer"],
             "used_clause_numbers": [1, 2],
             "confidence": 0.85,
-            "additional_insights": "Optional: Related considerations, important implications, or areas requiring attention"
+            "additional_insights": lang_example["additional_insights"]
         }
-        
+
         return f"""{clauses_text}
 
 QUESTION: {question}
 
 YOUR OBJECTIVE: Provide a comprehensive answer that addresses the question and highlights relevant considerations.
+
+LANGUAGE: Respond in {language.value} ({'English' if language == SupportedLanguage.ENGLISH else 'हिंदी' if language == SupportedLanguage.HINDI else 'বাংলা'})
 
 Return response in this exact JSON format:
 {json.dumps(output_format, indent=2)}
@@ -565,7 +620,8 @@ RESPONSE GUIDELINES:
 • ADDITIONAL_INSIGHTS: Include relevant considerations, implications, or important related information
 • Use clear, professional language that remains accessible
 • Reference clauses as "Clause X (Category Name)" where X is the clause number
-• When citing clauses, use natural language like "as outlined in Clause 3 (Termination)" """
+• When citing clauses, use natural language like "as outlined in Clause 3 (Termination)"
+• IMPORTANT: Keep legal terms in English but provide explanations in the target language"""
     
     def _parse_qa_response(
         self, 

@@ -8,6 +8,21 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class SupportedLanguage(str, Enum):
+    """Supported languages for document analysis."""
+    ENGLISH = "en"
+    HINDI = "hi"
+    BENGALI = "bn"
+    TAMIL = "ta"
+    TELUGU = "te"
+    MARATHI = "mr"
+    GUJARATI = "gu"
+    KANNADA = "kn"
+    MALAYALAM = "ml"
+    PUNJABI = "pa"
+    URDU = "ur"
+
+
 class DocumentStatus(str, Enum):
     """Document processing status enumeration."""
     UPLOADED = "uploaded"
@@ -29,6 +44,7 @@ class DocumentUploadResponse(BaseModel):
     status: DocumentStatus = Field(description="Processing status")
     filename: str = Field(description="Original filename")
     message: str = Field(description="Status message")
+    language: SupportedLanguage = Field(default=SupportedLanguage.ENGLISH, description="Document language")
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -39,6 +55,7 @@ class ClauseSummary(BaseModel):
     category: str = Field(description="Clause category/type")
     risk_level: RiskLevel = Field(description="Risk assessment level")
     summary: str = Field(description="Plain-language summary")
+    language: SupportedLanguage = Field(default=SupportedLanguage.ENGLISH, description="Summary language")
     readability_metrics: 'ReadabilityMetrics' = Field(description="Readability analysis metrics")
     needs_review: bool = Field(description="Flagged for manual review")
 
@@ -60,6 +77,7 @@ class ClauseDetail(BaseModel):
     risk_level: RiskLevel = Field(description="Risk assessment level")
     original_text: str = Field(description="Original clause text (potentially masked)")
     summary: str = Field(description="Plain-language summary")
+    language: SupportedLanguage = Field(default=SupportedLanguage.ENGLISH, description="Summary and content language")
     readability_metrics: ReadabilityMetrics = Field(description="Readability analysis")
     needs_review: bool = Field(description="Flagged for manual review")
     negotiation_tip: Optional[str] = Field(description="Optional negotiation suggestion")
@@ -72,6 +90,7 @@ class DocumentMetadata(BaseModel):
     file_size: int = Field(description="File size in bytes")
     page_count: int = Field(description="Number of pages")
     status: DocumentStatus = Field(description="Processing status")
+    language: SupportedLanguage = Field(default=SupportedLanguage.ENGLISH, description="Document analysis language")
     created_at: datetime = Field(description="Upload timestamp")
     processed_at: Optional[datetime] = Field(description="Processing completion timestamp")
     masked: bool = Field(description="Whether PII was detected and masked")

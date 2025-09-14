@@ -7,7 +7,7 @@ from uuid import uuid4
 from datetime import datetime
 
 from app.core.logging import get_logger, LogContext, log_execution_time
-from app.models.document import DocumentStatus, RiskLevel
+from app.models.document import DocumentStatus, RiskLevel, SupportedLanguage
 from app.services.document_processor_http import DocumentProcessor, DocumentProcessingError
 from app.services.clause_segmenter import ClauseSegmenter, ClauseCandidate
 from app.services.gemini_client import GeminiClient, GeminiError
@@ -34,12 +34,13 @@ class DocumentOrchestrator:
         self.embeddings_service = EmbeddingsService()
     
     async def process_document_complete(
-        self, 
+        self,
         doc_id: str,
         file_content: bytes,
         filename: str,
         mime_type: str,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        language: SupportedLanguage = SupportedLanguage.ENGLISH
     ) -> Dict[str, Any]:
         """
         Complete document processing pipeline.
@@ -114,9 +115,9 @@ class DocumentOrchestrator:
                     raise Exception("No clauses could be extracted from document")
                 
                 # Stage 4: Gemini Summarization
-                logger.info("Stage 4: AI summarization")
+                logger.info(f"Stage 4: AI summarization (language: {language.value})")
                 summarization_results = await self.gemini_client.batch_summarize_clauses(
-                    clause_candidates, include_negotiation_tips=True
+                    clause_candidates, include_negotiation_tips=True, language=language
                 )
                 processing_result["stages_completed"].append("ai_summarization")
                 
@@ -166,6 +167,7 @@ class DocumentOrchestrator:
                         "original_text": clause.text,  # This is already masked
                         "summary": summary_result.get("summary", ""),
                         "category": summary_result.get("category", "Other"),
+                        "language": language.value,
                         "risk_level": risk_assessment.risk_level.value,
                         "needs_review": risk_assessment.needs_review,
                         "readability_metrics": {

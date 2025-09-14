@@ -15,6 +15,7 @@ from google.cloud.firestore import SERVER_TIMESTAMP
 from app.core.config import Settings, get_settings
 from app.models.qa import QuestionRequest, AnswerResponse, SourceCitation
 from app.models.chat import MessageRole, AddMessageRequest
+from app.models.document import SupportedLanguage
 from app.services.firestore_client import FirestoreClient, FirestoreError
 from app.services.embeddings_service import EmbeddingsService, EmbeddingsError
 from app.services.gemini_client import GeminiClient, GeminiError
@@ -35,7 +36,8 @@ logger = logging.getLogger(__name__)
 @router.post("/ask", response_model=AnswerResponse)
 async def ask_question(
     request: QuestionRequest,
-    background_tasks: BackgroundTasks,
+    language: SupportedLanguage = SupportedLanguage.ENGLISH,
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     settings: Settings = Depends(get_settings),
     firestore_client: FirestoreClient = Depends(get_firestore_client),
     embeddings_service: EmbeddingsService = Depends(get_embeddings_service),
@@ -216,7 +218,8 @@ async def ask_question(
         qa_result = await gemini_client.answer_question(
             question=enhanced_question,
             relevant_clauses=relevant_clauses,
-            doc_id=request.doc_id
+            doc_id=request.doc_id,
+            language=language
         )
         
         # 5. Build response with proper source citations
@@ -286,7 +289,8 @@ async def ask_question(
 @router.post("/ask-stream")
 async def ask_question_stream(
     request: QuestionRequest,
-    background_tasks: BackgroundTasks,
+    language: SupportedLanguage = SupportedLanguage.ENGLISH,
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     settings: Settings = Depends(get_settings),
     firestore_client: FirestoreClient = Depends(get_firestore_client),
     embeddings_service: EmbeddingsService = Depends(get_embeddings_service),
@@ -410,7 +414,8 @@ async def ask_question_stream(
             qa_result = await gemini_client.answer_question(
                 question=enhanced_question,
                 relevant_clauses=relevant_clauses,
-                doc_id=request.doc_id
+                doc_id=request.doc_id,
+                language=language
             )
             
             # Build sources
