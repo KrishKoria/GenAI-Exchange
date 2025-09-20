@@ -20,6 +20,7 @@ import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useTranslations } from "next-intl";
+import { useLocale } from "@/providers/LocaleProvider";
 
 // Custom markdown component for chat messages
 const ChatMarkdown = ({ content }: { content: string }) => {
@@ -160,10 +161,14 @@ export const ChatInterface = ({
   onClearContext,
   onUploadClick,
   isProcessing = false,
-  placeholder = "Ask about clauses, risks, or request a plain-English summary…",
+  placeholder,
   disabled = false,
 }: ChatInterfaceProps) => {
   const t = useTranslations();
+  const { locale } = useLocale(); // Add locale dependency to ensure re-rendering
+
+  // Use translated placeholder if none provided
+  const translatedPlaceholder = placeholder || t("chat.placeholder");
   const [input, setInput] = useState("");
   const [isComposing, setIsComposing] = useState(false);
   const [showTypingHint, setShowTypingHint] = useState(false);
@@ -175,6 +180,12 @@ export const ChatInterface = ({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Force re-render when locale changes to update translations
+  useEffect(() => {
+    // This effect ensures the component re-renders when locale changes
+    // The locale dependency will trigger re-evaluation of all translations
+  }, [locale]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -531,7 +542,9 @@ export const ChatInterface = ({
                     }
                   }}
                   onKeyDown={handleKeyDown}
-                  placeholder={disabled ? t("chat.pleaseWait") : placeholder}
+                  placeholder={
+                    disabled ? t("chat.pleaseWait") : translatedPlaceholder
+                  }
                   disabled={disabled}
                   className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-white/40 text-white max-h-[120px] leading-5"
                   style={{ minHeight: "20px" }}
