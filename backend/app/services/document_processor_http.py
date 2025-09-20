@@ -10,6 +10,7 @@ import os
 from typing import Optional, Dict, Any
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
+from google.auth import default
 import PyPDF2
 from pdfminer.high_level import extract_text
 from pdfminer.pdfparser import PDFSyntaxError
@@ -39,27 +40,50 @@ class DocumentProcessor:
         logger.info(f"Endpoint URL: {self.endpoint_url}")
     
     def _get_access_token(self) -> str:
-        """Get OAuth2 access token using service account credentials."""
+        """Get OAuth2 access token using Application Default Credentials."""
         try:
-            # Load service account credentials
-            credentials_path = "./credentials.json"
+            # Use Application Default Credentials (ADC)
+            # This works both locally (with gcloud auth) and in Cloud Run (with attached service account)
+            logger.info("Using Application Default Credentials (ADC) for authentication")
             
-            logger.info(f"Loading service account credentials from {credentials_path}")
-            credentials = service_account.Credentials.from_service_account_file(
-                credentials_path,
-                scopes=['https://www.googleapis.com/auth/cloud-platform']
-            )
+            credentials, project = default(scopes=['https://www.googleapis.com/auth/cloud-platform'])
             
-            # Refresh the token
-            auth_req = Request()
-            credentials.refresh(auth_req)
+            # Refresh the token if needed
+            if not credentials.token or credentials.expired:
+                auth_req = Request()
+                credentials.refresh(auth_req)
             
             access_token = credentials.token
-            logger.info("Successfully obtained OAuth2 access token")
+            logger.info("Successfully obtained OAuth2 access token using ADC")
             return access_token
             
         except Exception as e:
-            logger.error(f"Failed to get access token: {str(e)}")
+            logger.error(f"Failed to get access token using ADC: {str(e)}")
+            
+            # Fallback: Try to use service account file if GOOGLE_APPLICATION_CREDENTIALS is set
+            credentials_path = self.settings.GOOGLE_APPLICATION_CREDENTIALS or "./credentials.json"
+            if os.path.exists(credentials_path):
+                try:
+                    logger.info(f"Fallback: Loading service account credentials from {credentials_path}")
+                    credentials = service_account.Credentials.from_service_account_file(
+                        credentials_path,
+                        scopes=['https://www.googleapis.com/auth/cloud-platform']
+                    )
+                    
+                    # Refresh the token
+                    auth_req = Request()
+                    credentials.refresh(auth_req)
+                    
+                    access_token = credentials.token
+                    logger.info("Successfully obtained OAuth2 access token using service account file")
+                    return access_token
+                    
+                except Exception as file_error:
+                    logger.error(f"Failed to get access token from service account file: {str(file_error)}")
+            else:
+                logger.warning(f"Service account file not found at {credentials_path}")
+            
+            # Re-raise the original ADC error if fallback also fails
             raise
     
     def clear_cache(self):

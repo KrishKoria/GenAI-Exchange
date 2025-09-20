@@ -5,7 +5,8 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP/_VERSION_CHECK=1
+    PIP_DISABLE_PIP/_VERSION_CHECK=1 \
+    GRPC_VERBOSITY=NONE
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \

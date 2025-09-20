@@ -15,6 +15,7 @@ google-cloud-storage
 google-cloud-dlp
 google-cloud-pubsub
 google-cloud-bigquery
+google-cloud-translate
 google-auth
 pandas
 numpy
