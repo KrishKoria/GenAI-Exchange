@@ -321,39 +321,114 @@ class FirestoreClient:
         embeddings_data: Dict[str, List[float]]
     ) -> bool:
         """
-        Update embeddings for multiple clauses.
+        Update embeddings for multiple clauses with automatic batching.
+        
+        Firestore limits:
+        - Maximum 500 writes per transaction/batch
+        - Maximum 10 MiB request size
+        
+        This method automatically chunks updates to respect these limits.
+        Uses a conservative batch size to account for embedding vector size
+        and Firestore overhead.
         
         Args:
             doc_id: Document identifier
             embeddings_data: Dict mapping clause_id to embedding vector
             
         Returns:
-            True if update successful
+            True if all updates successful
+            
+        Raises:
+            FirestoreError: If any batch fails to commit
         """
+        MAX_WRITES_PER_BATCH = 50
+        
         with LogContext(logger, doc_id=doc_id, embedding_count=len(embeddings_data)):
             logger.info("Updating clause embeddings")
             
-            batch = self.db.batch()
+            # Log embedding dimensions for debugging
+            if embeddings_data:
+                sample_embedding = next(iter(embeddings_data.values()))
+                embedding_dim = len(sample_embedding) if sample_embedding else 0
+                logger.info(f"Embedding dimensions: {embedding_dim}")
             
             try:
                 doc_ref = self.db.collection("documents").document(doc_id)
                 clauses_collection = doc_ref.collection("clauses")
                 
-                for clause_id, embedding in embeddings_data.items():
-                    clause_ref = clauses_collection.document(clause_id)
-                    batch.update(clause_ref, {
-                        "embedding": embedding,
-                        "updated_at": firestore.SERVER_TIMESTAMP
-                    })
+                # Convert dict to list of items for chunking
+                embedding_items = list(embeddings_data.items())
+                total_items = len(embedding_items)
                 
-                batch.commit()
+                # Calculate number of batches needed
+                num_batches = (total_items + MAX_WRITES_PER_BATCH - 1) // MAX_WRITES_PER_BATCH
                 
-                logger.info(f"Updated embeddings for {len(embeddings_data)} clauses")
+                if num_batches > 1:
+                    logger.info(f"Splitting {total_items} updates into {num_batches} batches "
+                              f"(max {MAX_WRITES_PER_BATCH} per batch)")
+                
+                # Process in chunks
+                successful_batches = 0
+                failed_batches = []
+                
+                for batch_num in range(num_batches):
+                    start_idx = batch_num * MAX_WRITES_PER_BATCH
+                    end_idx = min(start_idx + MAX_WRITES_PER_BATCH, total_items)
+                    chunk = embedding_items[start_idx:end_idx]
+                    
+                    logger.debug(f"Processing batch {batch_num + 1}/{num_batches} "
+                               f"({len(chunk)} items, indices {start_idx}-{end_idx-1})")
+                    
+                    # Create a new batch for this chunk
+                    batch = self.db.batch()
+                    
+                    for clause_id, embedding in chunk:
+                        clause_ref = clauses_collection.document(clause_id)
+                        batch.update(clause_ref, {
+                            "embedding": embedding,
+                            "updated_at": firestore.SERVER_TIMESTAMP
+                        })
+                    
+                    # Commit this batch
+                    try:
+                        batch.commit()
+                        successful_batches += 1
+                        logger.debug(f"Successfully committed batch {batch_num + 1}/{num_batches}")
+                    except GoogleAPIError as batch_error:
+                        failed_batches.append({
+                            "batch_num": batch_num + 1,
+                            "start_idx": start_idx,
+                            "end_idx": end_idx,
+                            "chunk_size": len(chunk),
+                            "error": str(batch_error)
+                        })
+                        logger.error(f"Failed to commit batch {batch_num + 1}/{num_batches} "
+                                   f"with {len(chunk)} items: {batch_error}")
+                        # If we're still hitting the size limit, we need to reduce batch size further
+                        if "too big" in str(batch_error).lower():
+                            logger.warning(f"Batch size of {len(chunk)} still too large. "
+                                         f"Consider reducing MAX_WRITES_PER_BATCH further.")
+                
+                # Report results
+                if failed_batches:
+                    error_msg = (f"Failed to update some embeddings: {successful_batches}/{num_batches} "
+                               f"batches succeeded. Failed batches: {failed_batches}")
+                    logger.error(error_msg)
+                    raise FirestoreError(error_msg)
+                
+                logger.info(f"Successfully updated embeddings for {len(embeddings_data)} clauses "
+                          f"in {num_batches} batch(es)")
                 return True
                 
+            except FirestoreError:
+                # Re-raise FirestoreError as-is
+                raise
             except GoogleAPIError as e:
                 logger.error(f"Failed to update embeddings: {e}")
                 raise FirestoreError(f"Failed to update embeddings: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error updating embeddings: {e}")
+                raise FirestoreError(f"Unexpected error updating embeddings: {e}")
     
     # Query Operations
     
