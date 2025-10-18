@@ -1,6 +1,8 @@
 import React, { useState, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { ClauseSummary, RiskLevel } from "@/lib/api";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { getTranslatedText } from "@/lib/translation-utils";
 
 interface RiskHeatmapProps {
   clauses: ClauseSummary[];
@@ -59,6 +61,7 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
   error = null,
 }) => {
   const t = useTranslations();
+  const { viewingLanguage } = useLanguage();
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
 
   // Process clauses into heatmap data
@@ -203,9 +206,9 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
   if (error) {
     return (
       <div className={`p-4 text-center text-red-400 ${className}`}>
-        <div className="text-sm">{t('analysis.failedToLoad')}</div>
+        <div className="text-sm">{t("analysis.failedToLoad")}</div>
         <div className="text-xs mt-1 text-white/60">
-          {error.message || t('analysis.refreshToTry')}
+          {error.message || t("analysis.refreshToTry")}
         </div>
       </div>
     );
@@ -214,10 +217,8 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
   if (clauses.length === 0) {
     return (
       <div className={`p-4 text-center text-white/50 ${className}`}>
-        <div className="text-sm">{t('analysis.noClauseData')}</div>
-        <div className="text-xs mt-1">
-          {t('analysis.uploadForAnalysis')}
-        </div>
+        <div className="text-sm">{t("analysis.noClauseData")}</div>
+        <div className="text-xs mt-1">{t("analysis.uploadForAnalysis")}</div>
       </div>
     );
   }
@@ -227,7 +228,7 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
       {/* Legend */}
       <div className="mb-4">
         <div className="text-xs font-medium text-white/70 mb-2">
-          {t('riskLevels.riskLevelsTitle')}
+          {t("riskLevels.riskLevelsTitle")}
         </div>
         <div className="flex gap-3">
           {RISK_LEVELS.map((level) => (
@@ -307,19 +308,25 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
             <div className="text-lg font-semibold text-white">
               {clauses.length}
             </div>
-            <div className="text-xs text-white/60">{t('analysis.totalClauses')}</div>
+            <div className="text-xs text-white/60">
+              {t("analysis.totalClauses")}
+            </div>
           </div>
           <div>
             <div className="text-lg font-semibold text-red-400">
               {clauses.filter((c) => c.risk_level === "attention").length}
             </div>
-            <div className="text-xs text-white/60">{t('analysis.highRisk')}</div>
+            <div className="text-xs text-white/60">
+              {t("analysis.highRisk")}
+            </div>
           </div>
           <div>
             <div className="text-lg font-semibold text-yellow-400">
               {clauses.filter((c) => c.risk_level === "moderate").length}
             </div>
-            <div className="text-xs text-white/60">{t('analysis.moderateRisk')}</div>
+            <div className="text-xs text-white/60">
+              {t("analysis.moderateRisk")}
+            </div>
           </div>
         </div>
       </div>
@@ -331,7 +338,8 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
           style={{ left: tooltip.x, top: tooltip.y }}
         >
           <div className="text-sm font-medium text-white mb-1">
-            {tooltip.cell.category} - {t(`riskLevels.${RISK_LABEL_KEYS[tooltip.cell.riskLevel]}`)}
+            {tooltip.cell.category} -{" "}
+            {t(`riskLevels.${RISK_LABEL_KEYS[tooltip.cell.riskLevel]}`)}
           </div>
           <div className="text-xs text-white/80 mb-2">
             {tooltip.cell.count} clause{tooltip.cell.count !== 1 ? "s" : ""} (
@@ -340,11 +348,18 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
           {tooltip.cell.clauses.length > 0 && (
             <div className="text-xs text-white/60">
               <div className="font-medium mb-1">Clauses:</div>
-              {tooltip.cell.clauses.slice(0, 3).map((clause) => (
-                <div key={clause.clause_id} className="truncate">
-                  • {clause.summary}
-                </div>
-              ))}
+              {tooltip.cell.clauses.slice(0, 3).map((clause) => {
+                const displayText = getTranslatedText(
+                  clause.summary,
+                  clause.translations,
+                  viewingLanguage
+                );
+                return (
+                  <div key={clause.clause_id} className="truncate">
+                    • {displayText}
+                  </div>
+                );
+              })}
               {tooltip.cell.clauses.length > 3 && (
                 <div className="text-white/40 mt-1">
                   +{tooltip.cell.clauses.length - 3} more

@@ -1,9 +1,10 @@
 import { Dashboard } from "@/sections/Dashboard";
+import { LanguageProvider } from "@/contexts/LanguageContext";
 
 export default function Home() {
   return (
-    <div>
+    <LanguageProvider>
       <Dashboard />
-    </div>
+    </LanguageProvider>
   );
 }

@@ -430,6 +430,96 @@ class FirestoreClient:
                 logger.error(f"Unexpected error updating embeddings: {e}")
                 raise FirestoreError(f"Unexpected error updating embeddings: {e}")
     
+    async def update_clause_translations(
+        self,
+        doc_id: str,
+        translations_data: Dict[str, Dict[str, str]]
+    ) -> bool:
+        """
+        Update translations for multiple clauses with automatic batching.
+        
+        Args:
+            doc_id: Document identifier
+            translations_data: Dict mapping clause_id to {language_code: translated_text} dict
+                Example: {
+                    "clause_1": {"hi": "हिंदी अनुवाद", "bn": "বাংলা অনুবাদ"},
+                    "clause_2": {"hi": "हिंदी", "bn": "বাংলা"}
+                }
+        
+        Returns:
+            True if all updates successful
+        
+        Raises:
+            FirestoreError: If any batch fails to commit
+        """
+        MAX_WRITES_PER_BATCH = 50
+        
+        with LogContext(logger, doc_id=doc_id, clause_count=len(translations_data)):
+            logger.info("Updating clause translations")
+            
+            try:
+                doc_ref = self.db.collection("documents").document(doc_id)
+                clauses_collection = doc_ref.collection("clauses")
+                
+                # Convert dict to list of items for chunking
+                translation_items = list(translations_data.items())
+                total_items = len(translation_items)
+                
+                # Calculate number of batches needed
+                num_batches = (total_items + MAX_WRITES_PER_BATCH - 1) // MAX_WRITES_PER_BATCH
+                
+                if num_batches > 1:
+                    logger.info(f"Splitting {total_items} updates into {num_batches} batches")
+                
+                # Process in chunks
+                successful_batches = 0
+                failed_batches = []
+                
+                for batch_num in range(num_batches):
+                    start_idx = batch_num * MAX_WRITES_PER_BATCH
+                    end_idx = min(start_idx + MAX_WRITES_PER_BATCH, total_items)
+                    chunk = translation_items[start_idx:end_idx]
+                    
+                    # Create a new batch for this chunk
+                    batch = self.db.batch()
+                    
+                    for clause_id, translations in chunk:
+                        clause_ref = clauses_collection.document(clause_id)
+                        batch.update(clause_ref, {
+                            "translations": translations,
+                            "updated_at": firestore.SERVER_TIMESTAMP
+                        })
+                    
+                    # Commit this batch
+                    try:
+                        batch.commit()
+                        successful_batches += 1
+                        logger.debug(f"Successfully committed translation batch {batch_num + 1}/{num_batches}")
+                    except GoogleAPIError as batch_error:
+                        failed_batches.append({
+                            "batch_num": batch_num + 1,
+                            "error": str(batch_error)
+                        })
+                        logger.error(f"Failed to commit translation batch {batch_num + 1}/{num_batches}: {batch_error}")
+                
+                # Report results
+                if failed_batches:
+                    error_msg = f"Failed to update some translations: {successful_batches}/{num_batches} batches succeeded"
+                    logger.error(error_msg)
+                    raise FirestoreError(error_msg)
+                
+                logger.info(f"Successfully updated translations for {len(translations_data)} clauses")
+                return True
+                
+            except FirestoreError:
+                raise
+            except GoogleAPIError as e:
+                logger.error(f"Failed to update translations: {e}")
+                raise FirestoreError(f"Failed to update translations: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error updating translations: {e}")
+                raise FirestoreError(f"Unexpected error updating translations: {e}")
+    
     # Query Operations
     
     async def get_clauses_by_risk_level(

@@ -50,12 +50,34 @@ export function useDocumentStatus(
 ) {
   return useQuery({
     queryKey: documentQueryKeys.status(docId || ""),
-    queryFn: () => documentApi.getDocumentStatus(docId!),
+    queryFn: async () => {
+      if (process.env.NODE_ENV === "development") {
+        console.log(`[useDocumentStatus] Fetching status for doc: ${docId}`);
+      }
+      const result = await documentApi.getDocumentStatus(docId!);
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          `[useDocumentStatus] Result for ${docId}: ${result.status}`
+        );
+      }
+      return result;
+    },
     enabled: enabled && !!docId,
     staleTime: 15000, // Reduced to 15 seconds for faster status updates
     refetchInterval: (query) => {
       // Poll every 2 seconds if processing, every 10 seconds if completed
       const status = query.state.data?.status;
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          `[useDocumentStatus] Refetch interval check - Doc: ${docId}, Status: ${status}, Interval: ${
+            status === "processing"
+              ? "2s"
+              : status === "completed"
+              ? "10s"
+              : "none"
+          }`
+        );
+      }
       if (status === "processing") return 2000;
       if (status === "completed") return 10000; // Still poll occasionally for updated metadata
       return false;

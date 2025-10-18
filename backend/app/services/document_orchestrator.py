@@ -17,6 +17,8 @@ from app.services.privacy_service import PrivacyService
 from app.services.risk_analyzer import RiskAnalyzer, RiskAssessment
 from app.services.readability_service import ReadabilityService
 from app.services.embeddings_service import EmbeddingsService, EmbeddingsError
+from app.services.translation_service import TranslationService
+from app.services.language_detection_service import LanguageDetectionService
 
 logger = get_logger(__name__)
 
@@ -34,6 +36,8 @@ class DocumentOrchestrator:
         self.risk_analyzer = RiskAnalyzer()
         self.readability_service = ReadabilityService()
         self.embeddings_service = EmbeddingsService()
+        self.translation_service = TranslationService()
+        self.language_detection_service = LanguageDetectionService()
     
     async def process_document_complete(
         self,
@@ -84,6 +88,56 @@ class DocumentOrchestrator:
                     doc_id, DocumentStatus.PROCESSING, 
                     {"page_count": document_data["page_count"]}
                 )
+                
+                # Stage 1.5: Automatic Language Detection
+                # If no language parameter was provided (defaults to English), detect the actual language
+                if language == SupportedLanguage.ENGLISH:
+                    logger.info("Stage 1.5: Automatic language detection")
+                    try:
+                        # Use a sample of the text for detection (first 5000 chars is usually enough)
+                        sample_text = document_data["text"][:5000]
+                        detection_result = await self.language_detection_service.detect_language_advanced(
+                            sample_text,
+                            session_id=session_id
+                        )
+                        
+                        # Override language if detection confidence is high and language is supported
+                        if detection_result.confidence > 0.7 and detection_result.language != "en":
+                            # Map detected language code to SupportedLanguage enum
+                            detected_lang_code = detection_result.language
+                            try:
+                                # Try to convert to SupportedLanguage enum
+                                for supported_lang in SupportedLanguage:
+                                    if supported_lang.value == detected_lang_code:
+                                        language = supported_lang
+                                        logger.info(
+                                            f"Auto-detected language: {language.value} "
+                                            f"(confidence: {detection_result.confidence:.2f}, "
+                                            f"method: {detection_result.method})"
+                                        )
+                                        processing_result["detected_language"] = {
+                                            "language": language.value,
+                                            "confidence": detection_result.confidence,
+                                            "method": detection_result.method
+                                        }
+                                        break
+                            except (ValueError, AttributeError):
+                                logger.warning(
+                                    f"Detected language '{detected_lang_code}' not in supported languages. "
+                                    f"Defaulting to English."
+                                )
+                        else:
+                            logger.info(
+                                f"Language detection confidence too low ({detection_result.confidence:.2f}) "
+                                f"or language is English. Using default: English"
+                            )
+                    except Exception as e:
+                        logger.warning(f"Language detection failed: {e}. Using default language: English")
+                        # Continue with default English if detection fails
+                    
+                    processing_result["stages_completed"].append("language_detection")
+                else:
+                    logger.info(f"Using provided language parameter: {language.value}")
                 
                 # Stage 2: Privacy Analysis and PII Masking
                 logger.info("Stage 2: Privacy analysis and PII masking") 
@@ -205,6 +259,19 @@ class DocumentOrchestrator:
                 # Don't await the task - let it run in the background
                 processing_result["stages_completed"].append("embeddings_background_started")
                 logger.info(f"Background embeddings generation started for {len(clauses_data)} clauses")
+                
+                # Stage 7.6: Generate Translations (Background Processing if Hindi requested)
+                if language != SupportedLanguage.ENGLISH:
+                    logger.info(f"Stage 7.6: Starting background translation to {language.value}")
+                    
+                    # Start translation generation as a fire-and-forget background task
+                    translation_task = asyncio.create_task(
+                        self._generate_clause_translations_background(doc_id, clauses_data, language)
+                    )
+                    
+                    # Don't await the task - let it run in the background
+                    processing_result["stages_completed"].append("translations_background_started")
+                    logger.info(f"Background translation generation started for {len(clauses_data)} clauses")
                 
                 # Stage 8: Generate Document-Level Analytics
                 logger.info("Stage 8: Document-level analytics")
@@ -465,6 +532,130 @@ class DocumentOrchestrator:
                 })
             except Exception as update_error:
                 logger.error(f"Failed to update embeddings failure status: {update_error}")
+    
+    async def _generate_clause_translations_background(
+        self,
+        doc_id: str,
+        clauses_data: List[Dict[str, Any]],
+        target_language: SupportedLanguage
+    ) -> None:
+        """
+        Generate and store translations for all clauses in the document as a background task.
+        
+        This method runs in the background and updates the document status when complete.
+        It handles errors gracefully without affecting the main pipeline.
+        
+        Args:
+            doc_id: Document identifier
+            clauses_data: List of clause data dictionaries containing summaries
+            target_language: Target language for translation
+        """
+        translation_start_time = asyncio.get_event_loop().time()
+        
+        try:
+            with LogContext(logger, doc_id=doc_id, clause_count=len(clauses_data), target_language=target_language.value):
+                logger.info(f"Starting background translation to {target_language.value}")
+                
+                # Prepare texts for translation
+                summaries = []
+                negotiation_tips = []
+                clause_ids = []
+                
+                for clause_data in clauses_data:
+                    summary = clause_data.get("summary", "")
+                    if summary.strip():
+                        summaries.append(summary)
+                        negotiation_tips.append(clause_data.get("negotiation_tip", ""))
+                        clause_ids.append(clause_data.get("clause_id"))
+                
+                if not summaries:
+                    logger.warning("No summaries found for translation")
+                    await self._update_document_metadata(doc_id, {
+                        "processing_statistics.translations_completed": False,
+                        "processing_statistics.translations_count": 0,
+                        "processing_statistics.translations_error": "No summaries to translate"
+                    })
+                    return
+                
+                # Batch translate summaries
+                logger.info(f"Translating {len(summaries)} clause summaries to {target_language.value}")
+                summary_results = await self.translation_service.translate_batch(
+                    summaries,
+                    target_language,
+                    source_language=SupportedLanguage.ENGLISH
+                )
+                
+                # Batch translate negotiation tips (only non-empty ones)
+                tip_results = []
+                tips_to_translate = [tip for tip in negotiation_tips if tip.strip()]
+                if tips_to_translate:
+                    logger.info(f"Translating {len(tips_to_translate)} negotiation tips to {target_language.value}")
+                    tip_results = await self.translation_service.translate_batch(
+                        tips_to_translate,
+                        target_language,
+                        source_language=SupportedLanguage.ENGLISH
+                    )
+                
+                # Prepare translations data for storage
+                translations_data = {}
+                tip_index = 0
+                
+                for i, clause_id in enumerate(clause_ids):
+                    clause_translations = {
+                        target_language.value: summary_results[i].translated_text
+                    }
+                    
+                    # Add negotiation tip translation if available
+                    if negotiation_tips[i].strip() and tip_index < len(tip_results):
+                        clause_translations[f"{target_language.value}_negotiation_tip"] = tip_results[tip_index].translated_text
+                        tip_index += 1
+                    
+                    translations_data[clause_id] = clause_translations
+                
+                if translations_data:
+                    # Store translations in Firestore
+                    await self.firestore_client.update_clause_translations(doc_id, translations_data)
+                    logger.info(f"Successfully stored translations for {len(translations_data)} clauses")
+                    
+                    # Calculate processing time
+                    translation_duration = int((asyncio.get_event_loop().time() - translation_start_time) * 1000)
+                    
+                    # Update document with successful translation completion
+                    await self._update_document_metadata(doc_id, {
+                        "processing_statistics.translations_completed": True,
+                        "processing_statistics.translations_language": target_language.value,
+                        "processing_statistics.translations_count": len(translations_data),
+                        "processing_statistics.translations_total_clauses": len(clauses_data),
+                        "processing_statistics.translations_success_rate": (len(translations_data) / len(clauses_data)) * 100,
+                        "processing_statistics.translations_duration_ms": translation_duration,
+                        "processing_statistics.translations_generated_at": asyncio.get_event_loop().time()
+                    })
+                    
+                    logger.info(f"Background translation completed: {len(translations_data)} clauses translated in {translation_duration}ms")
+                else:
+                    logger.warning("No translations were generated")
+                
+        except Exception as e:
+            # Log error but don't crash - translations can be regenerated later
+            logger.error(f"Background translation generation failed for document {doc_id}: {e}")
+            
+            try:
+                # Calculate timing info even for failures
+                translation_duration = int((asyncio.get_event_loop().time() - translation_start_time) * 1000)
+                
+                # Update document with failure status (metadata only)
+                await self._update_document_metadata(doc_id, {
+                    "processing_statistics.translations_completed": False,
+                    "processing_statistics.translations_count": 0,
+                    "processing_statistics.translations_total_clauses": len(clauses_data),
+                    "processing_statistics.translations_success_rate": 0,
+                    "processing_statistics.translations_failed_count": len(clauses_data),
+                    "processing_statistics.translations_duration_ms": translation_duration,
+                    "processing_statistics.translations_error": str(e),
+                    "processing_statistics.translations_failed_at": asyncio.get_event_loop().time()
+                })
+            except Exception as update_error:
+                logger.error(f"Failed to update translation failure status: {update_error}")
     
     async def _update_document_metadata(
         self, 

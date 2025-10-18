@@ -24,7 +24,7 @@ from app.models.document import (
     SupportedLanguage
 )
 from app.services.document_orchestrator import DocumentOrchestrator
-from app.dependencies.services import get_document_orchestrator
+from app.dependencies.services import get_document_orchestrator, get_translation_service
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -572,7 +572,8 @@ async def get_document_clauses(
                     delta=readability_metrics_data.get("delta", 0.0),
                     flesch_score=readability_metrics_data.get("flesch_score", 0.0)
                 ),
-                needs_review=clause_data.get("needs_review", False)
+                needs_review=clause_data.get("needs_review", False),
+                translations=clause_data.get("translations")  # Include translations from Firestore
             )
             clause_summaries.append(summary)
         
@@ -636,7 +637,9 @@ async def get_clause_detail(
                 flesch_score=readability_metrics_data.get("flesch_score", 0.0)
             ),
             needs_review=clause_data.get("needs_review", False),
-            negotiation_tip=clause_data.get("negotiation_tip")
+            negotiation_tip=clause_data.get("negotiation_tip"),
+            translations=clause_data.get("translations"),
+            negotiation_tip_translations=clause_data.get("negotiation_tip_translations")
         )
         
         return clause_detail
@@ -648,4 +651,159 @@ async def get_clause_detail(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to retrieve clause detail: {str(e)}"
+        )
+
+@router.post("/{doc_id}/translate")
+async def translate_document(
+    doc_id: str,
+    target_language: SupportedLanguage,
+    orchestrator: DocumentOrchestrator = Depends(get_document_orchestrator)
+) -> Dict[str, Any]:
+    """
+    Generate translations for all clauses in a document on-demand.
+    
+    This endpoint allows users to request translations for an already processed document
+    in any supported language. Translations are stored in Firestore and cached for
+    future requests.
+    
+    Args:
+        doc_id: Document identifier
+        target_language: Target language for translation
+        orchestrator: Document orchestrator service
+        
+    Returns:
+        Translation status and metadata
+        
+    Raises:
+        HTTPException: If document not found or translation fails
+    """
+    logger.info(f"Translation request for document {doc_id} to {target_language.value}")
+    
+    try:
+        # Check if document exists and get clauses
+        document = await orchestrator.firestore_client.get_document(doc_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Get all clauses for the document
+        clauses = await orchestrator.firestore_client.get_document_clauses(doc_id)
+        if not clauses:
+            raise HTTPException(
+                status_code=400,
+                detail="No clauses found in document. Document may still be processing."
+            )
+        
+        # Check if document is still processing
+        doc_status = document.get("status")
+        if doc_status == DocumentStatus.PROCESSING:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Document is still processing. Please wait for processing to complete."
+            )
+        
+        # Check if target language is English (no translation needed)
+        if target_language == SupportedLanguage.ENGLISH:
+            raise HTTPException(
+                status_code=400,
+                detail="Target language is English. Translations are only available for non-English languages."
+            )
+        
+        # Prepare clause data for translation
+        clauses_data = []
+        for clause in clauses:
+            clauses_data.append({
+                "clause_id": clause.get("clause_id"),
+                "summary": clause.get("summary", ""),
+                "negotiation_tip": clause.get("negotiation_tip", "")
+            })
+        
+        logger.info(f"Translating {len(clauses_data)} clauses to {target_language.value}")
+        
+        # Generate translations
+        translation_start = asyncio.get_event_loop().time()
+        
+        # Prepare texts for translation
+        summaries = []
+        negotiation_tips = []
+        clause_ids = []
+        
+        for clause_data in clauses_data:
+            summary = clause_data.get("summary") or ""
+            # Only process clauses with valid summaries
+            if summary and summary.strip():
+                summaries.append(summary)
+                # Ensure negotiation_tip is never None
+                negotiation_tip = clause_data.get("negotiation_tip") or ""
+                negotiation_tips.append(negotiation_tip)
+                clause_ids.append(clause_data.get("clause_id"))
+        
+        if not summaries:
+            raise HTTPException(
+                status_code=400,
+                detail="No clause summaries found to translate"
+            )
+        
+        # Batch translate summaries
+        summary_results = await orchestrator.translation_service.translate_batch(
+            summaries,
+            target_language,
+            source_language=SupportedLanguage.ENGLISH
+        )
+        
+        # Batch translate negotiation tips (only non-empty ones)
+        tip_results = []
+        tips_to_translate = [tip for tip in negotiation_tips if tip and tip.strip()]
+        if tips_to_translate:
+            tip_results = await orchestrator.translation_service.translate_batch(
+                tips_to_translate,
+                target_language,
+                source_language=SupportedLanguage.ENGLISH
+            )
+        
+        # Prepare translations data for storage
+        translations_data = {}
+        tip_index = 0
+        
+        for i, clause_id in enumerate(clause_ids):
+            clause_translations = {
+                target_language.value: summary_results[i].translated_text
+            }
+            
+            # Add negotiation tip translation if available
+            # Check that tip exists, is not None, and has content
+            if negotiation_tips[i] and negotiation_tips[i].strip() and tip_index < len(tip_results):
+                clause_translations[f"{target_language.value}_negotiation_tip"] = tip_results[tip_index].translated_text
+                tip_index += 1
+            
+            translations_data[clause_id] = clause_translations
+        
+        # Store translations in Firestore
+        if translations_data:
+            await orchestrator.firestore_client.update_clause_translations(doc_id, translations_data)
+            logger.info(f"Successfully stored translations for {len(translations_data)} clauses")
+            
+            # Calculate processing time
+            translation_duration = int((asyncio.get_event_loop().time() - translation_start) * 1000)
+            
+            return {
+                "status": "success",
+                "doc_id": doc_id,
+                "target_language": target_language.value,
+                "translations_count": len(translations_data),
+                "duration_ms": translation_duration,
+                "message": f"Successfully translated {len(translations_data)} clauses to {target_language.value}"
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Translation failed - no translations were generated"
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Translation request failed for document {doc_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Translation failed: {str(e)}"
         )

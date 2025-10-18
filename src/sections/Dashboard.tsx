@@ -11,6 +11,7 @@ import {
   Flame,
   BarChart3,
   X,
+  Languages,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,9 @@ import { ChatInterface, ChatMessage } from "@/components/ChatInterface";
 import { UploadSuccessCard } from "@/components/UploadSuccessCard";
 import { ReadabilityPanel } from "@/components/ReadabilityPanel";
 import { LanguageSelector } from "@/components/LanguageSelector";
+import { TranslationPanel } from "@/components/TranslationPanel";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { localeNames } from "@/i18n/config";
 import { useTranslations } from "next-intl";
 const validateFileBasics = (file: File) => {
   const errors: string[] = [];
@@ -69,6 +73,7 @@ import { useToast, createToast } from "@/components/ui/toast";
 
 export const Dashboard = () => {
   const t = useTranslations();
+  const { viewingLanguage } = useLanguage();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -590,6 +595,13 @@ export const Dashboard = () => {
   useEffect(() => {
     if (!documentStatus || !currentDocId) return;
 
+    // Debug: Log status updates
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        `[Status Update] Doc ID: ${currentDocId}, Status: ${documentStatus.status}, Clause Count: ${documentStatus.clause_count}`
+      );
+    }
+
     // Update document status in recentDocs
     setRecentDocs((prev) =>
       prev.map((doc) =>
@@ -724,7 +736,7 @@ export const Dashboard = () => {
       <aside
         className={`${
           sidebarOpen ? "flex" : "hidden"
-        } md:flex w-64 shrink-0 flex-col border-r border-white/10 bg-[#111111] h-full overflow-hidden`}
+        } md:flex w-80 shrink-0 flex-col border-r border-white/10 bg-[#111111] h-full overflow-hidden`}
       >
         <div className="p-4 flex flex-col gap-4 h-full overflow-hidden">
           {/* Brand + Language Selector + Mobile toggle */}
@@ -789,25 +801,36 @@ export const Dashboard = () => {
               )}
               {filteredDocs.map((doc) => {
                 const checked = selectedDocs.includes(doc.id);
+                const isCompleted = doc.status === "completed";
+
+                // Debug logging for translation button visibility
+                if (process.env.NODE_ENV === "development") {
+                  console.log(
+                    `[TranslateButton Debug] Doc: ${doc.name}, Status: ${doc.status}, isCompleted: ${isCompleted}`
+                  );
+                }
+
                 return (
-                  <button
+                  <div
                     key={doc.id}
-                    onClick={() => toggleSelectDoc(doc.id)}
-                    className={`group flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-all duration-200 transform ${
+                    className={`group flex w-full items-center justify-between rounded-lg border px-3 py-2 transition-all duration-200 transform ${
                       checked
                         ? "border-purple-500/70 bg-gradient-to-r from-purple-500/20 to-purple-600/10 ring-2 ring-purple-500/40 shadow-lg shadow-purple-500/20 scale-[1.02]"
                         : "border-white/5 bg-[#0F0F0F] hover:border-white/20 hover:bg-white/5"
                     }`}
                   >
-                    <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => toggleSelectDoc(doc.id)}
+                      className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                    >
                       <FileText
-                        className={`h-4 w-4 transition-colors duration-200 ${
+                        className={`h-4 w-4 shrink-0 transition-colors duration-200 ${
                           checked ? "text-purple-400" : "text-white/70"
                         }`}
                       />
-                      <div>
+                      <div className="flex-1 min-w-0">
                         <div
-                          className={`text-sm leading-tight transition-colors duration-200 ${
+                          className={`text-sm leading-tight transition-colors duration-200 truncate ${
                             checked ? "text-white" : "text-white/90"
                           }`}
                         >
@@ -821,29 +844,32 @@ export const Dashboard = () => {
                           {doc.date} {doc.status && `• ${doc.status}`}
                         </div>
                       </div>
+                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <div
+                        onClick={() => toggleSelectDoc(doc.id)}
+                        className={`relative h-4 w-4 rounded-full border-2 transition-all duration-200 cursor-pointer ${
+                          checked
+                            ? "bg-purple-500 border-purple-400 shadow-md shadow-purple-500/50"
+                            : "bg-transparent border-white/30 group-hover:border-white/50"
+                        }`}
+                      >
+                        {checked && (
+                          <svg
+                            className="absolute inset-0 w-full h-full p-0.5 text-white"
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                        )}
+                      </div>
                     </div>
-                    <div
-                      className={`relative h-4 w-4 rounded-full border-2 transition-all duration-200 ${
-                        checked
-                          ? "bg-purple-500 border-purple-400 shadow-md shadow-purple-500/50"
-                          : "bg-transparent border-white/30 group-hover:border-white/50"
-                      }`}
-                    >
-                      {checked && (
-                        <svg
-                          className="absolute inset-0 w-full h-full p-0.5 text-white"
-                          fill="currentColor"
-                          viewBox="0 0 20 20"
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                      )}
-                    </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -889,6 +915,27 @@ export const Dashboard = () => {
             {t("navigation.analysis")}
           </Button>
         </div>
+
+        {/* Viewing Language Indicator */}
+        {viewingLanguage !== "en" && (
+          <div className="mx-4 mt-4 p-3 bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/30 rounded-lg flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Languages className="h-5 w-5 text-purple-400" />
+              <div>
+                <div className="text-sm font-semibold text-white">
+                  Viewing in {localeNames[viewingLanguage]}
+                </div>
+                <div className="text-xs text-white/60">
+                  Clause summaries and tips are displayed in{" "}
+                  {localeNames[viewingLanguage]}
+                </div>
+              </div>
+            </div>
+            <div className="text-xs text-purple-300 bg-purple-500/20 px-2 py-1 rounded">
+              {localeNames[viewingLanguage].toUpperCase()}
+            </div>
+          </div>
+        )}
 
         {/* Upload Cards */}
         {Object.entries(uploadCards).length > 0 && (
@@ -992,6 +1039,20 @@ export const Dashboard = () => {
                   clauses={clauses || []}
                   isLoading={clausesLoading}
                   error={clausesError}
+                />
+              </div>
+            </div>
+
+            {/* Translation Section */}
+            <div>
+              <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-white/70">
+                <Languages className="h-4 w-4 text-purple-400" /> Translations
+              </h3>
+              <div className="bg-white/5 border border-white/10 rounded-lg p-4">
+                <TranslationPanel
+                  docId={currentDocId}
+                  isLoading={clausesLoading}
+                  clauses={clauses}
                 />
               </div>
             </div>

@@ -58,6 +58,7 @@ class ClauseSummary(BaseModel):
     language: SupportedLanguage = Field(default=SupportedLanguage.ENGLISH, description="Summary language")
     readability_metrics: 'ReadabilityMetrics' = Field(description="Readability analysis metrics")
     needs_review: bool = Field(description="Flagged for manual review")
+    translations: Optional[Dict[str, str]] = Field(default=None, description="Translations of summary to other languages")
 
 
 class ReadabilityMetrics(BaseModel):
@@ -81,6 +82,8 @@ class ClauseDetail(BaseModel):
     readability_metrics: ReadabilityMetrics = Field(description="Readability analysis")
     needs_review: bool = Field(description="Flagged for manual review")
     negotiation_tip: Optional[str] = Field(description="Optional negotiation suggestion")
+    translations: Optional[Dict[str, str]] = Field(default=None, description="Translations of summary to other languages")
+    negotiation_tip_translations: Optional[Dict[str, str]] = Field(default=None, description="Translations of negotiation tip")
 
 
 class DocumentMetadata(BaseModel):

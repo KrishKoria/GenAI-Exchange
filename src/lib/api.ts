@@ -80,6 +80,7 @@ export interface ClauseSummary {
   summary: string;
   readability_metrics: ReadabilityMetrics;
   needs_review: boolean;
+  translations?: Record<string, string>; // { hi: "...", bn: "...", ta: "..." }
 }
 
 export interface ReadabilityMetrics {
@@ -100,6 +101,8 @@ export interface ClauseDetail {
   readability_metrics: ReadabilityMetrics;
   needs_review: boolean;
   negotiation_tip?: string;
+  translations?: Record<string, string>;
+  negotiation_tip_translations?: Record<string, string>;
 }
 
 export interface ProcessingProgress {
@@ -415,6 +418,33 @@ export const documentApi = {
   async cancelQueueItem(docId: string): Promise<QueueItemResponse> {
     const response: AxiosResponse<QueueItemResponse> = await apiClient.delete(
       `/api/v1/documents/queue/cancel/${docId}`
+    );
+
+    return response.data;
+  },
+
+  /**
+   * Translate document clauses to target language
+   */
+  async translateDocument(
+    docId: string,
+    targetLanguage: string
+  ): Promise<{
+    status: string;
+    doc_id: string;
+    target_language: string;
+    translations_count: number;
+    duration_ms: number;
+    message: string;
+  }> {
+    const response = await apiClient.post(
+      `/api/v1/documents/${docId}/translate`,
+      null,
+      {
+        params: {
+          target_language: targetLanguage,
+        },
+      }
     );
 
     return response.data;
