@@ -8,7 +8,8 @@ from datetime import datetime
 
 from app.core.logging import get_logger, LogContext, log_execution_time
 from app.models.document import DocumentStatus, RiskLevel, SupportedLanguage
-from app.services.document_processor_http import DocumentProcessor, DocumentProcessingError
+from app.services.document_processor_grpc import DocumentProcessorGRPC, DocumentProcessingError
+from app.services.document_processor_http import DocumentProcessor as DocumentProcessorHTTP
 from app.services.clause_segmenter import ClauseSegmenter, ClauseCandidate
 from app.services.gemini_client import GeminiClient, GeminiError
 from app.services.firestore_client import FirestoreClient, FirestoreError
@@ -24,7 +25,8 @@ class DocumentOrchestrator:
     """Orchestrates the complete document processing pipeline."""
     
     def __init__(self):
-        self.document_processor = DocumentProcessor()
+        self.document_processor = DocumentProcessorGRPC()
+        self.document_processor_http = DocumentProcessorHTTP()
         self.clause_segmenter = ClauseSegmenter()
         self.gemini_client = GeminiClient()
         self.firestore_client = FirestoreClient()
@@ -73,7 +75,7 @@ class DocumentOrchestrator:
                 # Stage 1: Document Processing (Text Extraction)
                 logger.info("Stage 1: Document text extraction")
                 document_data = await self.document_processor.process_document(
-                    file_content, filename, mime_type
+                    file_content, filename, use_fallback=False
                 )
                 processing_result["stages_completed"].append("text_extraction")
                 
@@ -223,7 +225,7 @@ class DocumentOrchestrator:
                         "avg_readability_improvement": document_readability_analysis["avg_grade_level_reduction"],
                         "embeddings_started": "embeddings_background_started" in processing_result["stages_completed"],
                         "embeddings_background": True,
-                        "embeddings_count": 0  # Will be updated when background task completes
+                        "embeddings_count": 0 
                     }
                 }
                 
@@ -358,6 +360,9 @@ class DocumentOrchestrator:
         with LogContext(logger, doc_id=doc_id, clause_count=len(clauses_data)):
             logger.info("Starting background embeddings generation")
             
+            # Initialize timing variable for error handling
+            embeddings_start_time = 0.0
+            
             # Prepare texts for embedding (use summary, fallback to original text)
             texts = []
             clause_ids = []
@@ -406,6 +411,9 @@ class DocumentOrchestrator:
             doc_id: Document identifier
             clauses_data: List of clause data dictionaries containing summaries
         """
+        # Initialize timing variable before try block for error handling visibility
+        embeddings_start_time = 0.0
+        
         try:
             with LogContext(logger, doc_id=doc_id, clause_count=len(clauses_data)):
                 logger.info("Starting background embeddings generation")
@@ -442,7 +450,7 @@ class DocumentOrchestrator:
             
             try:
                 # Calculate timing info even for failures
-                embeddings_duration = (asyncio.get_event_loop().time() - embeddings_start_time) * 1000 if 'embeddings_start_time' in locals() else 0
+                embeddings_duration = (asyncio.get_event_loop().time() - embeddings_start_time) * 1000
                 
                 # Update document with failure status (metadata only)
                 await self._update_document_metadata(doc_id, {

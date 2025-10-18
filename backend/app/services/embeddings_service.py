@@ -25,7 +25,7 @@ class EmbeddingsService:
     
     def __init__(self):
         self.settings = get_settings()
-        genai.configure(api_key=self.settings.GOOGLE_GENAI_API_KEY)
+        genai.configure(api_key=self.settings.GOOGLE_GENAI_API_KEY)  # type: ignore
         self.model_name = "models/text-embedding-004"
         
     def _log_execution_time(self, operation: str, start_time: float) -> None:
@@ -57,7 +57,7 @@ class EmbeddingsService:
             
             # Use asyncio.to_thread to make the synchronous API call async
             result = await asyncio.to_thread(
-                genai.embed_content,
+                genai.embed_content,  # type: ignore
                 model=self.model_name,
                 content=text,
                 task_type="retrieval_document"
@@ -80,9 +80,8 @@ class EmbeddingsService:
     async def generate_embeddings_batch(
         self, 
         texts: List[str], 
-        max_concurrent: int = 5,
-        batch_size: int = 20
-    ) -> List[List[float]]:
+        max_concurrent: int = 15,
+    ) -> List[Optional[List[float]]]:
         """
         Generate embeddings for multiple texts with parallel processing.
         
@@ -128,7 +127,7 @@ class EmbeddingsService:
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
             # Process results and maintain order
-            embeddings = [None] * len(texts)
+            embeddings: List[Optional[List[float]]] = [None] * len(texts)
             successful_count = 0
             failed_count = 0
             
@@ -138,7 +137,8 @@ class EmbeddingsService:
                     failed_count += 1
                     continue
                 
-                index, embedding = result
+                # Type checker knows result is a tuple after Exception check
+                index, embedding = result  # type: ignore
                 embeddings[index] = embedding
                 
                 if embedding is not None:
