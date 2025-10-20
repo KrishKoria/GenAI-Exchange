@@ -161,8 +161,7 @@ class NegotiationService:
                     "Successfully generated negotiation alternatives",
                     extra={
                         "num_alternatives": len(alternatives),
-                        "generation_time": generation_time,
-                        "clause_risk_level": risk_level
+                        "generation_time": generation_time
                     }
                 )
                 
