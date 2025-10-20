@@ -1,12 +1,19 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useLayoutEffect } from "react";
 import { useTranslations } from "next-intl";
 import { ClauseSummary, RiskLevel } from "@/lib/api";
+import { Sparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface RiskHeatmapProps {
   clauses: ClauseSummary[];
   className?: string;
   isLoading?: boolean;
   error?: Error | null;
+  onGenerateAlternatives?: (
+    clauseId: string,
+    clauseCategory: string,
+    riskLevel: string
+  ) => void;
 }
 
 interface HeatmapCell {
@@ -57,9 +64,13 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
   className = "",
   isLoading = false,
   error = null,
+  onGenerateAlternatives,
 }) => {
   const t = useTranslations();
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
+  const [tooltipHovered, setTooltipHovered] = useState(false);
+  const leaveTimerRef = useRef<number | null>(null);
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
 
   // Process clauses into heatmap data
   const heatmapData = useMemo(() => {
@@ -118,6 +129,12 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
   }, [clauses]);
 
   const handleCellHover = (cell: HeatmapCell, event: React.MouseEvent) => {
+    // Clear any pending leave timers when entering a cell
+    if (leaveTimerRef.current) {
+      window.clearTimeout(leaveTimerRef.current);
+      leaveTimerRef.current = null;
+    }
+
     const rect = event.currentTarget.getBoundingClientRect();
     setTooltip({
       cell,
@@ -127,7 +144,29 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
   };
 
   const handleCellLeave = () => {
-    setTooltip(null);
+    // Delay closing to allow the user to move cursor into tooltip
+    if (leaveTimerRef.current) window.clearTimeout(leaveTimerRef.current);
+    leaveTimerRef.current = window.setTimeout(() => {
+      if (!tooltipHovered) setTooltip(null);
+      leaveTimerRef.current = null;
+    }, 180);
+  };
+
+  const handleTooltipMouseEnter = () => {
+    if (leaveTimerRef.current) {
+      window.clearTimeout(leaveTimerRef.current);
+      leaveTimerRef.current = null;
+    }
+    setTooltipHovered(true);
+  };
+
+  const handleTooltipMouseLeave = () => {
+    setTooltipHovered(false);
+    // small delay to allow moving back to cell
+    leaveTimerRef.current = window.setTimeout(() => {
+      setTooltip(null);
+      leaveTimerRef.current = null;
+    }, 120);
   };
 
   const getIntensity = (percentage: number) => {
@@ -150,6 +189,25 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
     const intensity = getIntensity(cell.percentage);
     return Math.max(0.1, intensity);
   };
+
+  // Keep tooltip inside viewport after it's positioned
+  useLayoutEffect(() => {
+    if (!tooltip || !tooltipRef.current) return;
+    const tt = tooltipRef.current.getBoundingClientRect();
+    const padding = 12;
+    const maxX = window.innerWidth - tt.width - padding;
+    const maxY = window.innerHeight - tt.height - padding;
+
+    let newX = tooltip.x;
+    let newY = tooltip.y;
+
+    if (newX > maxX) newX = Math.max(padding, maxX);
+    if (newY > maxY) newY = Math.max(padding, padding);
+
+    if (newX !== tooltip.x || newY !== tooltip.y) {
+      setTooltip((t) => (t ? { ...t, x: newX, y: newY } : t));
+    }
+  }, [tooltip]);
 
   if (isLoading) {
     return (
@@ -203,9 +261,9 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
   if (error) {
     return (
       <div className={`p-4 text-center text-red-400 ${className}`}>
-        <div className="text-sm">{t('analysis.failedToLoad')}</div>
+        <div className="text-sm">{t("analysis.failedToLoad")}</div>
         <div className="text-xs mt-1 text-white/60">
-          {error.message || t('analysis.refreshToTry')}
+          {error.message || t("analysis.refreshToTry")}
         </div>
       </div>
     );
@@ -214,10 +272,8 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
   if (clauses.length === 0) {
     return (
       <div className={`p-4 text-center text-white/50 ${className}`}>
-        <div className="text-sm">{t('analysis.noClauseData')}</div>
-        <div className="text-xs mt-1">
-          {t('analysis.uploadForAnalysis')}
-        </div>
+        <div className="text-sm">{t("analysis.noClauseData")}</div>
+        <div className="text-xs mt-1">{t("analysis.uploadForAnalysis")}</div>
       </div>
     );
   }
@@ -227,7 +283,7 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
       {/* Legend */}
       <div className="mb-4">
         <div className="text-xs font-medium text-white/70 mb-2">
-          {t('riskLevels.riskLevelsTitle')}
+          {t("riskLevels.riskLevelsTitle")}
         </div>
         <div className="flex gap-3">
           {RISK_LEVELS.map((level) => (
@@ -307,19 +363,25 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
             <div className="text-lg font-semibold text-white">
               {clauses.length}
             </div>
-            <div className="text-xs text-white/60">{t('analysis.totalClauses')}</div>
+            <div className="text-xs text-white/60">
+              {t("analysis.totalClauses")}
+            </div>
           </div>
           <div>
             <div className="text-lg font-semibold text-red-400">
               {clauses.filter((c) => c.risk_level === "attention").length}
             </div>
-            <div className="text-xs text-white/60">{t('analysis.highRisk')}</div>
+            <div className="text-xs text-white/60">
+              {t("analysis.highRisk")}
+            </div>
           </div>
           <div>
             <div className="text-lg font-semibold text-yellow-400">
               {clauses.filter((c) => c.risk_level === "moderate").length}
             </div>
-            <div className="text-xs text-white/60">{t('analysis.moderateRisk')}</div>
+            <div className="text-xs text-white/60">
+              {t("analysis.moderateRisk")}
+            </div>
           </div>
         </div>
       </div>
@@ -327,11 +389,15 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
       {/* Tooltip */}
       {tooltip && (
         <div
+          ref={tooltipRef}
+          onMouseEnter={handleTooltipMouseEnter}
+          onMouseLeave={handleTooltipMouseLeave}
           className="fixed z-50 bg-gray-900 border border-gray-700 rounded-lg p-3 shadow-lg max-w-xs"
           style={{ left: tooltip.x, top: tooltip.y }}
         >
           <div className="text-sm font-medium text-white mb-1">
-            {tooltip.cell.category} - {t(`riskLevels.${RISK_LABEL_KEYS[tooltip.cell.riskLevel]}`)}
+            {tooltip.cell.category} -{" "}
+            {t(`riskLevels.${RISK_LABEL_KEYS[tooltip.cell.riskLevel]}`)}
           </div>
           <div className="text-xs text-white/80 mb-2">
             {tooltip.cell.count} clause{tooltip.cell.count !== 1 ? "s" : ""} (
@@ -341,8 +407,32 @@ export const RiskHeatmap: React.FC<RiskHeatmapProps> = ({
             <div className="text-xs text-white/60">
               <div className="font-medium mb-1">Clauses:</div>
               {tooltip.cell.clauses.slice(0, 3).map((clause) => (
-                <div key={clause.clause_id} className="truncate">
-                  • {clause.summary}
+                <div key={clause.clause_id} className="mb-1">
+                  <div className="truncate">• {clause.summary}</div>
+                  {/* Show Generate Alternatives button for risky clauses */}
+                  {(clause.risk_level === "attention" ||
+                    clause.risk_level === "moderate") &&
+                    onGenerateAlternatives && (
+                      <div className="mt-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full text-xs h-8 bg-purple-500/20 hover:bg-purple-500/30 border-purple-500/50 text-purple-200"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onGenerateAlternatives(
+                              clause.clause_id,
+                              clause.category,
+                              clause.risk_level
+                            );
+                            // Tooltip will be closed by parent logic when panel opens; do not forcibly close here
+                          }}
+                        >
+                          <Sparkles className="h-3 w-3 mr-1" />
+                          Get Alternatives
+                        </Button>
+                      </div>
+                    )}
                 </div>
               ))}
               {tooltip.cell.clauses.length > 3 && (

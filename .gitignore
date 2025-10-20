@@ -43,3 +43,6 @@ venv/
 next-env.d.ts
 
 credentials.json
+
+
+plan/

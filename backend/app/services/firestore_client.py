@@ -643,6 +643,100 @@ class FirestoreClient:
             logger.warning(f"Failed to update clause count: {e}")
             return False
     
+    # Negotiation Operations
+    
+    async def save_negotiation_history(
+        self,
+        negotiation_id: str,
+        history_data: Dict[str, Any]
+    ) -> bool:
+        """
+        Save negotiation history to Firestore.
+        
+        Args:
+            negotiation_id: Unique negotiation identifier
+            history_data: Negotiation history data
+            
+        Returns:
+            True if successful
+        """
+        with LogContext(logger, negotiation_id=negotiation_id):
+            logger.info("Saving negotiation history")
+            
+            try:
+                # Add timestamps
+                history_data["created_at"] = history_data.get("created_at", firestore.SERVER_TIMESTAMP)
+                history_data["updated_at"] = firestore.SERVER_TIMESTAMP
+                
+                # Save to negotiations collection
+                self.db.collection("negotiations").document(negotiation_id).set(
+                    history_data,
+                    merge=True
+                )
+                
+                logger.info("Negotiation history saved successfully")
+                return True
+                
+            except GoogleAPIError as e:
+                logger.error(f"Google API error saving negotiation: {e}", exc_info=True)
+                raise FirestoreError(f"Failed to save negotiation: {e}")
+            except Exception as e:
+                logger.error(f"Failed to save negotiation history: {e}", exc_info=True)
+                raise FirestoreError(f"Failed to save negotiation: {e}")
+    
+    async def get_negotiation_history(
+        self,
+        doc_id: str,
+        clause_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve negotiation history for a document or clause.
+        
+        Args:
+            doc_id: Document identifier
+            clause_id: Optional clause identifier to filter by
+            
+        Returns:
+            List of negotiation history entries
+        """
+        with LogContext(logger, doc_id=doc_id, clause_id=clause_id):
+            logger.info("Retrieving negotiation history")
+            
+            try:
+                # Build query - simplified to avoid composite index requirement
+                query = self.db.collection("negotiations").where(
+                    filter=FieldFilter("doc_id", "==", doc_id)
+                )
+                
+                # Filter by clause if specified
+                if clause_id:
+                    query = query.where(
+                        filter=FieldFilter("clause_id", "==", clause_id)
+                    )
+                
+                # Execute query (no order_by to avoid composite index)
+                docs = query.stream()
+                
+                # Convert to list
+                history = []
+                for doc in docs:
+                    data = doc.to_dict()
+                    data["negotiation_id"] = doc.id
+                    history.append(data)
+                
+                # Sort in-memory by created_at (descending - newest first)
+                history.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+                
+                logger.info(f"Retrieved {len(history)} negotiation entries")
+                return history
+                
+            except GoogleAPIError as e:
+                logger.error(f"Google API error retrieving negotiations: {e}", exc_info=True)
+                raise FirestoreError(f"Failed to retrieve negotiations: {e}")
+            except Exception as e:
+                logger.error(f"Failed to retrieve negotiation history: {e}", exc_info=True)
+                raise FirestoreError(f"Failed to retrieve negotiations: {e}")
+    
     # Health check
     
     async def health_check(self) -> bool:

@@ -659,10 +659,206 @@ export function getStatusColor(status: DocumentStatus): string {
   }
 }
 
+// ========================================
+// NEGOTIATION TYPES
+// ========================================
+
+export type AlternativeType = "balanced" | "protective" | "simplified";
+
+export interface NegotiationAlternative {
+  alternative_id?: string;
+  alternative_text: string;
+  strategic_benefit: string;
+  risk_reduction: string;
+  implementation_notes: string;
+  confidence: number;
+  alternative_type: AlternativeType;
+  created_at?: string;
+}
+
+export interface RiskAnalysisSummary {
+  risk_level: RiskLevel;
+  confidence: number;
+  risk_score: number;
+  detected_keywords: string[];
+  risk_factors: string[];
+}
+
+export interface NegotiationResponse {
+  negotiation_id?: string;
+  original_clause: string;
+  original_risk_level: RiskLevel;
+  alternatives: NegotiationAlternative[];
+  risk_analysis?: RiskAnalysisSummary;
+  generation_time: number;
+  model_used: string;
+  context: Record<string, unknown>;
+  created_at?: string;
+  clause_id?: string;
+  doc_id?: string;
+}
+
+export interface NegotiationRequest {
+  clause_text: string;
+  clause_category?: string;
+  risk_level?: RiskLevel;
+  document_context?: Record<string, unknown>;
+  user_preferences?: Record<string, unknown>;
+  clause_id?: string;
+  doc_id?: string;
+}
+
+export interface QuickAlternativeRequest {
+  clause_text: string;
+  clause_category?: string;
+}
+
+export interface QuickAlternativeResponse {
+  original_clause: string;
+  alternatives: Array<{
+    text: string;
+    benefit: string;
+    type: AlternativeType;
+    risk_reduction: string;
+  }>;
+  generation_time: number;
+}
+
+export interface BatchNegotiationRequest {
+  clause_ids: string[];
+  doc_id: string;
+  document_context?: Record<string, unknown>;
+  user_preferences?: Record<string, unknown>;
+  max_concurrent?: number;
+}
+
+export interface BatchNegotiationResponse {
+  doc_id: string;
+  total_clauses: number;
+  successful: number;
+  failed: number;
+  negotiations: NegotiationResponse[];
+  generation_time: number;
+  created_at?: string;
+}
+
+export interface SaveNegotiationRequest {
+  negotiation_id: string;
+  doc_id: string;
+  clause_id: string;
+  selected_alternative_id?: string;
+  user_feedback?: string;
+  was_helpful?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface NegotiationHistory {
+  negotiation_id: string;
+  doc_id: string;
+  clause_id: string;
+  original_clause: string;
+  alternatives: NegotiationAlternative[];
+  selected_alternative_id?: string;
+  user_feedback?: string;
+  was_helpful?: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface NegotiationHistoryResponse {
+  doc_id: string;
+  total_negotiations: number;
+  negotiations: NegotiationHistory[];
+  query_time: number;
+}
+
+// ========================================
+// NEGOTIATION API
+// ========================================
+
+export const negotiationApi = {
+  /**
+   * Generate negotiation alternatives for a single clause
+   */
+  generateAlternatives: async (
+    request: NegotiationRequest
+  ): Promise<NegotiationResponse> => {
+    const response: AxiosResponse<NegotiationResponse> = await apiClient.post(
+      "/api/v1/negotiation/generate",
+      request
+    );
+    return response.data;
+  },
+
+  /**
+   * Quick alternative generation (simplified for demo)
+   */
+  generateQuickAlternatives: async (
+    request: QuickAlternativeRequest
+  ): Promise<QuickAlternativeResponse> => {
+    const response: AxiosResponse<QuickAlternativeResponse> =
+      await apiClient.post("/api/v1/negotiation/quick", request);
+    return response.data;
+  },
+
+  /**
+   * Generate alternatives for multiple clauses in batch
+   */
+  generateBatchAlternatives: async (
+    request: BatchNegotiationRequest
+  ): Promise<BatchNegotiationResponse> => {
+    const response: AxiosResponse<BatchNegotiationResponse> =
+      await apiClient.post("/api/v1/negotiation/batch", request);
+    return response.data;
+  },
+
+  /**
+   * Save negotiation interaction with user feedback
+   */
+  saveNegotiation: async (
+    request: SaveNegotiationRequest
+  ): Promise<{ message: string; negotiation_id: string }> => {
+    const response = await apiClient.post("/api/v1/negotiation/save", request);
+    return response.data;
+  },
+
+  /**
+   * Get negotiation history for a document or clause
+   */
+  getNegotiationHistory: async (
+    docId: string,
+    clauseId?: string
+  ): Promise<NegotiationHistoryResponse> => {
+    const params = clauseId ? { clause_id: clauseId } : {};
+    const response: AxiosResponse<NegotiationHistoryResponse> =
+      await apiClient.get(`/api/v1/negotiation/history/${docId}`, { params });
+    return response.data;
+  },
+
+  /**
+   * Get negotiation statistics for a document
+   */
+  getNegotiationStats: async (
+    docId: string
+  ): Promise<{
+    doc_id: string;
+    total_negotiations: number;
+    total_alternatives: number;
+    selection_rate: number;
+    helpful_rate: number;
+    most_common_categories: Array<{ category: string; count: number }>;
+  }> => {
+    const response = await apiClient.get(`/api/v1/negotiation/stats/${docId}`);
+    return response.data;
+  },
+};
+
 const apiExports = {
   documentApi,
   qaApi,
   chatSessionApi,
+  negotiationApi,
   generateRiskHeatmap,
   getTopRiskyClauses,
   formatProcessingMessage,

@@ -11,6 +11,7 @@ import {
   Flame,
   BarChart3,
   X,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,8 @@ import { ChatInterface, ChatMessage } from "@/components/ChatInterface";
 import { UploadSuccessCard } from "@/components/UploadSuccessCard";
 import { ReadabilityPanel } from "@/components/ReadabilityPanel";
 import { LanguageSelector } from "@/components/LanguageSelector";
+import { NegotiationPanel } from "@/components/NegotiationPanel";
+import { useNegotiation } from "@/hooks/useNegotiation";
 import { useTranslations } from "next-intl";
 const validateFileBasics = (file: File) => {
   const errors: string[] = [];
@@ -110,6 +113,16 @@ export const Dashboard = () => {
     [key: string]: NodeJS.Timeout;
   }>({});
 
+  // Negotiation feature state
+  const [negotiationPanelOpen, setNegotiationPanelOpen] = useState(false);
+  const [selectedClauseForNegotiation, setSelectedClauseForNegotiation] =
+    useState<{
+      clause_id: string;
+      clause_text: string;
+      clause_category: string;
+      risk_level: string;
+    } | null>(null);
+
   const { toast } = useToast();
 
   // API hooks
@@ -118,6 +131,9 @@ export const Dashboard = () => {
   const askQuestionMutation = useChatAwareAskQuestion();
   const createChatSessionMutation = useCreateChatSession();
   const updateDocumentContextMutation = useUpdateDocumentContext();
+
+  // Negotiation hooks
+  const negotiation = useNegotiation(currentDocId);
 
   // Keep single document hook for backward compatibility (status info, etc.)
   const { status: statusQuery, clauses: singleClausesQuery } =
@@ -575,6 +591,99 @@ export const Dashboard = () => {
     }
   }
 
+  // Handle generating negotiation alternatives
+  async function handleGenerateAlternatives(
+    clauseId: string,
+    clauseCategory: string,
+    riskLevel: string
+  ) {
+    if (!currentDocId) {
+      toast(
+        createToast.error(
+          "No Document Selected",
+          "Please select a document first."
+        )
+      );
+      return;
+    }
+
+    try {
+      // Find the clause in our local data first for quick display
+      const clause = clauses.find((c) => c.clause_id === clauseId);
+      if (!clause) {
+        throw new Error("Clause not found");
+      }
+
+      // Store the clause details and open the panel
+      setSelectedClauseForNegotiation({
+        clause_id: clauseId,
+        clause_text: clause.summary, // Use summary as placeholder until we get full text
+        clause_category: clauseCategory,
+        risk_level: riskLevel,
+      });
+      setNegotiationPanelOpen(true);
+
+      // Generate alternatives - the backend will fetch the original_text
+      await negotiation.generateAlternatives.mutateAsync({
+        clause_text: clause.summary, // Backend can use clause_id to fetch original_text
+        clause_category: clauseCategory,
+        clause_id: clauseId,
+        doc_id: currentDocId,
+        risk_level: riskLevel as any,
+      });
+
+      toast(
+        createToast.success(
+          "Alternatives Generated",
+          "AI has generated 3 strategic alternatives for your clause."
+        )
+      );
+    } catch (error: unknown) {
+      console.error("Failed to generate alternatives:", error);
+      toast(
+        createToast.error(
+          "Generation Failed",
+          (error as Error)?.message ||
+            "Failed to generate alternatives. Please try again."
+        )
+      );
+    }
+  }
+
+  // Close negotiation panel
+  function closeNegotiationPanel() {
+    setNegotiationPanelOpen(false);
+    setSelectedClauseForNegotiation(null);
+  }
+
+  // Handle selecting an alternative
+  async function handleSelectAlternative(alternativeId: string) {
+    if (
+      !negotiation.generateAlternatives.data?.negotiation_id ||
+      !selectedClauseForNegotiation
+    ) {
+      return;
+    }
+
+    try {
+      await negotiation.saveFeedback(
+        negotiation.generateAlternatives.data.negotiation_id,
+        selectedClauseForNegotiation.clause_id,
+        alternativeId,
+        true
+      );
+
+      toast(
+        createToast.success(
+          "Alternative Saved",
+          "Your selection has been recorded for future improvements."
+        )
+      );
+    } catch (error) {
+      console.error("Failed to save alternative:", error);
+    }
+  }
+
   // Generate top risky clauses - memoized for performance
 
   // Update current document when selection changes
@@ -992,9 +1101,68 @@ export const Dashboard = () => {
                   clauses={clauses || []}
                   isLoading={clausesLoading}
                   error={clausesError}
+                  onGenerateAlternatives={handleGenerateAlternatives}
                 />
               </div>
             </div>
+
+            {/* AI Negotiation Assistant Section */}
+            {negotiationPanelOpen && selectedClauseForNegotiation && (
+              <div>
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-white/70">
+                    <Sparkles className="h-4 w-4 text-purple-500" />
+                    AI Negotiation Assistant
+                  </h3>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={closeNegotiationPanel}
+                    className="h-6 text-xs"
+                  >
+                    Close
+                  </Button>
+                </div>
+
+                <div className="bg-[#0F0F0F] border border-white/10 rounded-lg p-4">
+                  <div className="mb-4 pb-4 border-b border-white/10">
+                    <div className="text-xs text-white/50 mb-1">
+                      Original Clause (
+                      {selectedClauseForNegotiation.clause_category})
+                    </div>
+                    <div className="text-sm text-white/90">
+                      {selectedClauseForNegotiation.clause_text}
+                    </div>
+                    <div className="mt-2 text-xs">
+                      <span
+                        className={`px-2 py-1 rounded ${
+                          selectedClauseForNegotiation.risk_level ===
+                          "attention"
+                            ? "bg-red-500/20 text-red-300"
+                            : "bg-yellow-500/20 text-yellow-300"
+                        }`}
+                      >
+                        {selectedClauseForNegotiation.risk_level === "attention"
+                          ? "High Risk"
+                          : "Moderate Risk"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <NegotiationPanel
+                    negotiationResponse={
+                      negotiation.generateAlternatives.data ?? null
+                    }
+                    isLoading={negotiation.generateAlternatives.isPending}
+                    error={negotiation.generateAlternatives.error}
+                    onSelectAlternative={handleSelectAlternative}
+                    onCopyAlternative={(altId) => {
+                      console.log("Copied alternative:", altId);
+                    }}
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Readability Analysis Section */}
             <div>
