@@ -45,6 +45,18 @@ export const NegotiationPanel: React.FC<NegotiationPanelProps> = ({
   >(new Set());
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  // Initialize all alternatives as expanded by default
+  React.useEffect(() => {
+    if (negotiationResponse?.alternatives) {
+      const allIds = new Set(
+        negotiationResponse.alternatives
+          .map((alt) => alt.alternative_id)
+          .filter((id): id is string => id !== null && id !== undefined)
+      );
+      setExpandedAlternativeIds(allIds);
+    }
+  }, [negotiationResponse]);
+
   const toggleExpanded = (alternativeId: string) => {
     setExpandedAlternativeIds((prev) => {
       const newSet = new Set(prev);

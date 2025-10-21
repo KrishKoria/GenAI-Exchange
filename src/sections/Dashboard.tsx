@@ -650,10 +650,13 @@ export const Dashboard = () => {
     }
   }
 
-  // Close negotiation panel
   function closeNegotiationPanel() {
     setNegotiationPanelOpen(false);
-    setSelectedClauseForNegotiation(null);
+  }
+
+  // Reopen negotiation panel
+  function reopenNegotiationPanel() {
+    setNegotiationPanelOpen(true);
   }
 
   // Handle selecting an alternative
@@ -1103,6 +1106,19 @@ export const Dashboard = () => {
                   error={clausesError}
                   onGenerateAlternatives={handleGenerateAlternatives}
                 />
+
+                {/* Reopen Negotiation Button (when panel closed but data exists) */}
+                {!negotiationPanelOpen && selectedClauseForNegotiation && (
+                  <Button
+                    onClick={reopenNegotiationPanel}
+                    variant="outline"
+                    size="sm"
+                    className="w-full border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 hover:text-purple-200"
+                  >
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Show Negotiation Alternatives
+                  </Button>
+                )}
               </div>
             </div>
 

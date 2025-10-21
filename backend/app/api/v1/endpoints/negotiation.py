@@ -54,6 +54,7 @@ def get_negotiation_service(
 async def generate_negotiation_alternatives(
     request: NegotiationRequest,
     negotiation_service: NegotiationService = Depends(get_negotiation_service),
+    firestore_client: FirestoreClient = Depends(get_firestore_client),
     settings: Settings = Depends(get_settings)
 ):
     """
@@ -89,6 +90,33 @@ async def generate_negotiation_alternatives(
                 response.clause_id = request.clause_id
             if request.doc_id:
                 response.doc_id = request.doc_id
+            
+            # Auto-save complete negotiation data to Firestore for history
+            if response.negotiation_id and request.doc_id and request.clause_id:
+                try:
+                    history_entry = {
+                        "negotiation_id": response.negotiation_id,
+                        "doc_id": request.doc_id,
+                        "clause_id": request.clause_id,
+                        "original_clause": request.clause_text,
+                        "alternatives": [alt.dict() for alt in response.alternatives],
+                        "metadata": {
+                            "clause_category": request.clause_category,
+                            "risk_level": request.risk_level.value if request.risk_level else None,
+                            "generation_time": response.generation_time,
+                            "model_used": response.model_used
+                        }
+                    }
+                    
+                    await firestore_client.save_negotiation_history(
+                        negotiation_id=response.negotiation_id,
+                        history_data=history_entry
+                    )
+                    
+                    logger.info(f"Auto-saved negotiation {response.negotiation_id} to Firestore")
+                except Exception as save_error:
+                    # Log but don't fail the request if save fails
+                    logger.warning(f"Failed to auto-save negotiation: {save_error}")
             
             logger.info(
                 "Successfully generated negotiation alternatives",
@@ -274,22 +302,22 @@ async def save_negotiation(
         logger.info("API request: Save negotiation interaction")
         
         try:
-            # Prepare negotiation history entry
-            history_entry = {
-                "negotiation_id": request.negotiation_id,
-                "doc_id": request.doc_id,
-                "clause_id": request.clause_id,
+            # Prepare feedback update (merge with existing data, don't overwrite)
+            feedback_update = {
                 "selected_alternative_id": request.selected_alternative_id,
                 "user_feedback": request.user_feedback,
                 "was_helpful": request.was_helpful,
-                "metadata": request.metadata or {},
-                "saved_at": datetime.utcnow().isoformat()
+                "updated_at": datetime.utcnow().isoformat()
             }
             
-            # Save to Firestore negotiations collection
+            # Merge metadata if provided
+            if request.metadata:
+                feedback_update["metadata"] = request.metadata
+            
+            # Save to Firestore negotiations collection (merge=True preserves existing fields)
             await firestore_client.save_negotiation_history(
                 negotiation_id=request.negotiation_id,
-                history_data=history_entry
+                history_data=feedback_update
             )
             
             logger.info("Successfully saved negotiation interaction")
