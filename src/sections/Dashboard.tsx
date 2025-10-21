@@ -123,6 +123,17 @@ export const Dashboard = () => {
       risk_level: string;
     } | null>(null);
 
+  // Track selected alternatives for chat integration
+  const [selectedAlternatives, setSelectedAlternatives] = useState<{
+    [clauseId: string]: {
+      alternativeId: string;
+      alternativeType: string;
+      clauseCategory: string;
+      strategicBenefit: string;
+      selectedAt: Date;
+    };
+  }>({});
+
   const { toast } = useToast();
 
   // API hooks
@@ -513,10 +524,22 @@ export const Dashboard = () => {
         }
       }
 
+      // Inject negotiation context - prioritize open negotiation over past selections
+      let enhancedQuestion = content;
+
+      // Priority 1: If negotiation panel is open, include full context with all alternatives
+      if (negotiationPanelOpen && negotiation.generateAlternatives.data) {
+        enhancedQuestion = content + buildFullNegotiationContext();
+      }
+      // Priority 2: If alternatives were selected recently, include brief context
+      else if (Object.keys(selectedAlternatives).length > 0) {
+        enhancedQuestion = content + buildSelectedAlternativesContext();
+      }
+
       // Ask the question using the chat-aware API
       const response = await askQuestionMutation.mutateAsync({
         doc_id: currentDocId,
-        question: content,
+        question: enhancedQuestion,
         session_id: `session-${Date.now()}`, // Keep for backward compatibility
         chat_session_id: sessionId || undefined,
         use_conversation_memory: !!sessionId, // Use memory if we have a session
@@ -632,6 +655,14 @@ export const Dashboard = () => {
         risk_level: riskLevel as any,
       });
 
+      // Add automated message to chat about the generated alternatives
+      addNegotiationMessageToChat(
+        clauseCategory,
+        undefined,
+        undefined,
+        "generated"
+      );
+
       toast(
         createToast.success(
           "Alternatives Generated",
@@ -659,6 +690,92 @@ export const Dashboard = () => {
     setNegotiationPanelOpen(true);
   }
 
+  // Add automated negotiation message to chat
+  function addNegotiationMessageToChat(
+    clauseCategory: string,
+    alternativeType?: string,
+    strategicBenefit?: string,
+    messageType: "generated" | "selected" = "generated"
+  ) {
+    const message: ChatMessage =
+      messageType === "generated"
+        ? {
+            id: `negotiation-gen-${Date.now()}`,
+            role: "assistant",
+            content: `🎯 **AI Negotiation Alternatives Generated**\n\nI've created 3 strategic alternatives for your **${clauseCategory}** clause. Each alternative offers a different approach:\n\n• **Balanced** - Middle-ground solution\n\n• **Protective** - Maximum risk reduction\n\n• **Simplified** - Clearer, more direct language\n\nReview them in the right panel and select the one that best fits your negotiation strategy. Feel free to ask me questions about any of the alternatives!`,
+            timestamp: new Date(),
+          }
+        : {
+            id: `negotiation-sel-${Date.now()}`,
+            role: "assistant",
+            content: `✅ **Alternative Selected!**\n\nYou've chosen the **${alternativeType}** alternative for your **${clauseCategory}** clause.\n\n**Strategic Benefit:**\n${strategicBenefit}\n\n💡 **Next Steps:**\n• Ask me to compare it with the original clause\n• Request an explanation of legal implications\n• Get help drafting a proposal email\n• Inquire about how this affects other clauses\n\nWhat would you like to know about your selection?`,
+            timestamp: new Date(),
+          };
+
+    setMessages((prev) => [...prev, message]);
+  }
+
+  // Build comprehensive negotiation context for chatbot (when panel is open)
+  function buildFullNegotiationContext(): string {
+    if (
+      !negotiation.generateAlternatives.data ||
+      !selectedClauseForNegotiation
+    ) {
+      return "";
+    }
+
+    const data = negotiation.generateAlternatives.data;
+    const selectedId = Object.values(selectedAlternatives).find(
+      (alt) =>
+        alt.clauseCategory === selectedClauseForNegotiation.clause_category
+    )?.alternativeId;
+
+    let context = `\n\n[NEGOTIATION CONTEXT for ${selectedClauseForNegotiation.clause_category} Clause:\n\n`;
+    context += `ORIGINAL CLAUSE:\n"${data.original_clause}"\n\n`;
+    context += `GENERATED ALTERNATIVES:\n\n`;
+
+    data.alternatives.forEach((alt, index) => {
+      const altType =
+        alt.alternative_type.charAt(0).toUpperCase() +
+        alt.alternative_type.slice(1);
+      const isSelected = alt.alternative_id === selectedId;
+
+      context += `${index + 1}. ${altType.toUpperCase()} Alternative${
+        isSelected ? " (SELECTED)" : ""
+      }:\n`;
+      context += `"${alt.alternative_text}"\n`;
+      context += `Strategic Benefit: ${alt.strategic_benefit}\n`;
+      context += `Risk Reduction: ${alt.risk_reduction}\n\n`;
+    });
+
+    context += `]`;
+    return context;
+  }
+
+  // Build brief context for selected alternatives (when panel is closed)
+  function buildSelectedAlternativesContext(): string {
+    const recentSelections = Object.entries(selectedAlternatives).filter(
+      ([, alt]) => {
+        const minutesAgo =
+          (new Date().getTime() - alt.selectedAt.getTime()) / (1000 * 60);
+        return minutesAgo < 30; // Only include selections from last 30 minutes
+      }
+    );
+
+    if (recentSelections.length === 0) {
+      return "";
+    }
+
+    let context = `\n\n[RECENT NEGOTIATION DECISIONS:\n\n`;
+    recentSelections.forEach(([, alt]) => {
+      context += `• Selected "${alt.alternativeType}" alternative for ${alt.clauseCategory} clause\n`;
+      context += `  Strategic Benefit: ${alt.strategicBenefit}\n\n`;
+    });
+    context += `]`;
+
+    return context;
+  }
+
   // Handle selecting an alternative
   async function handleSelectAlternative(alternativeId: string) {
     if (
@@ -676,10 +793,41 @@ export const Dashboard = () => {
         true
       );
 
+      // Find the selected alternative details
+      const selectedAlt =
+        negotiation.generateAlternatives.data.alternatives.find(
+          (alt) => alt.alternative_id === alternativeId
+        );
+
+      if (selectedAlt) {
+        // Track the selection in state
+        setSelectedAlternatives((prev) => ({
+          ...prev,
+          [selectedClauseForNegotiation.clause_id]: {
+            alternativeId: alternativeId,
+            alternativeType:
+              selectedAlt.alternative_type.charAt(0).toUpperCase() +
+              selectedAlt.alternative_type.slice(1),
+            clauseCategory: selectedClauseForNegotiation.clause_category,
+            strategicBenefit: selectedAlt.strategic_benefit,
+            selectedAt: new Date(),
+          },
+        }));
+
+        // Add automated message to chat about the selection
+        addNegotiationMessageToChat(
+          selectedClauseForNegotiation.clause_category,
+          selectedAlt.alternative_type.charAt(0).toUpperCase() +
+            selectedAlt.alternative_type.slice(1),
+          selectedAlt.strategic_benefit,
+          "selected"
+        );
+      }
+
       toast(
         createToast.success(
           "Alternative Saved",
-          "Your selection has been recorded for future improvements."
+          "Your selection has been recorded and added to the chat."
         )
       );
     } catch (error) {
