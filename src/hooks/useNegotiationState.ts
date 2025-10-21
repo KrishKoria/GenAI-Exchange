@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNegotiation } from "./useNegotiation";
 import { useToast, createToast } from "@/components/ui/toast";
 import { ClauseSummary, RiskLevel } from "@/lib/api";
@@ -62,6 +62,22 @@ export const useNegotiationState = ({
   const [selectedAlternatives, setSelectedAlternatives] = useState<{
     [clauseId: string]: SelectedAlternative;
   }>({});
+
+  // Clear negotiation state when selected clause is no longer in the current document(s)
+  useEffect(() => {
+    if (selectedClauseForNegotiation) {
+      // Check if the selected clause still exists in the current clauses
+      const clauseExists = clauses.some(
+        (c) => c.clause_id === selectedClauseForNegotiation.clause_id
+      );
+
+      // If clause doesn't exist in current selection, clear negotiation state
+      if (!clauseExists) {
+        setSelectedClauseForNegotiation(null);
+        setNegotiationPanelOpen(false);
+      }
+    }
+  }, [clauses, selectedClauseForNegotiation]);
 
   // Handle generating negotiation alternatives
   const handleGenerateAlternatives = async (

@@ -194,6 +194,7 @@ class GeminiClient:
                     temperature=0.3,  # Slightly higher for more engaging, conversational responses
                     top_p=0.9,       # Increased for more diverse language choices
                     top_k=50,        # Increased for more varied vocabulary
+                    response_mime_type="application/json",  # Force JSON output with proper escaping
                     safety_settings=safety_settings
                 )
             )
@@ -628,7 +629,7 @@ RESPONSE GUIDELINES:
         response: str, 
         relevant_clauses: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        """Parse Q&A response JSON."""
+        """Parse Q&A response JSON with robust error handling for control characters."""
         
         try:
             # Extract JSON from response
@@ -636,10 +637,30 @@ RESPONSE GUIDELINES:
             json_end = response.rfind('}') + 1
             
             if json_start == -1 or json_end == 0:
+                logger.error(f"No JSON object found in response. Response text: {response[:500]}")
                 raise ValueError("No JSON object found in response")
             
             json_text = response[json_start:json_end]
-            result = json.loads(json_text)
+            
+            # Try parsing with strict=False first (allows control characters)
+            try:
+                result = json.loads(json_text, strict=False)
+            except json.JSONDecodeError as strict_error:
+                # If strict=False fails, try cleaning the JSON text
+                logger.warning(f"Initial JSON parse failed: {strict_error}. Attempting to clean JSON text.")
+                
+                # Replace common problematic control characters
+                cleaned_json = json_text.replace('\r', '\\r').replace('\t', '\\t')
+                
+                # Try parsing again
+                try:
+                    result = json.loads(cleaned_json, strict=False)
+                    logger.info("Successfully parsed JSON after cleaning control characters")
+                except json.JSONDecodeError as clean_error:
+                    # Log the problematic JSON for debugging
+                    logger.error(f"JSON parsing failed even after cleaning: {clean_error}")
+                    logger.error(f"Problematic JSON (first 1000 chars): {json_text[:1000]}")
+                    raise
             
             # Handle both old and new format for backward compatibility
             used_clause_numbers = result.get("used_clause_numbers", [])
@@ -690,6 +711,7 @@ RESPONSE GUIDELINES:
             
         except (json.JSONDecodeError, ValueError) as e:
             logger.error(f"Failed to parse Q&A response: {e}")
+            logger.error(f"Response text (first 500 chars): {response[:500]}")
             
             # Return fallback response
             return {
