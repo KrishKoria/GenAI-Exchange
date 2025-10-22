@@ -230,6 +230,7 @@ class FirestoreClient:
                         "needs_review": clause_data.get("needs_review", False),
                         "readability_metrics": clause_data.get("readability_metrics", {}),
                         "negotiation_tip": clause_data.get("negotiation_tip"),
+                        "language": clause_data.get("language", "en"),
                         "confidence": clause_data.get("confidence", 0.5),
                         "processing_method": clause_data.get("processing_method", "unknown"),
                         "created_at": firestore.SERVER_TIMESTAMP,

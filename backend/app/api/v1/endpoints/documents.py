@@ -565,7 +565,7 @@ async def get_document_clauses(
                 category=clause_data.get("category", "Other"),
                 risk_level=clause_data.get("risk_level", "moderate"),
                 summary=clause_data.get("summary", ""),
-                language=language or clause_data.get("language", SupportedLanguage.ENGLISH),
+                language=clause_data.get("language", SupportedLanguage.ENGLISH.value),  # Use stored language from Firestore
                 readability_metrics=ReadabilityMetrics(
                     original_grade=readability_metrics_data.get("original_grade", 0.0),
                     summary_grade=readability_metrics_data.get("summary_grade", 0.0),
@@ -628,7 +628,7 @@ async def get_clause_detail(
             risk_level=clause_data.get("risk_level", "moderate"),
             original_text=clause_data.get("original_text", ""),
             summary=clause_data.get("summary", ""),
-            language=language or clause_data.get("language", SupportedLanguage.ENGLISH),
+            language=clause_data.get("language", SupportedLanguage.ENGLISH.value),  # Use stored language from Firestore
             readability_metrics=ReadabilityMetrics(
                 original_grade=readability_metrics_data.get("original_grade", 0.0),
                 summary_grade=readability_metrics_data.get("summary_grade", 0.0),

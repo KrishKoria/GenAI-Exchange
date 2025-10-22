@@ -17,6 +17,7 @@ from app.services.privacy_service import PrivacyService
 from app.services.risk_analyzer import RiskAnalyzer, RiskAssessment
 from app.services.readability_service import ReadabilityService
 from app.services.embeddings_service import EmbeddingsService, EmbeddingsError
+from app.services.language_detection_service import LanguageDetectionService
 
 logger = get_logger(__name__)
 
@@ -34,6 +35,7 @@ class DocumentOrchestrator:
         self.risk_analyzer = RiskAnalyzer()
         self.readability_service = ReadabilityService()
         self.embeddings_service = EmbeddingsService()
+        self.language_detection_service = LanguageDetectionService()
     
     async def process_document_complete(
         self,
@@ -84,6 +86,44 @@ class DocumentOrchestrator:
                     doc_id, DocumentStatus.PROCESSING, 
                     {"page_count": document_data["page_count"]}
                 )
+                
+                # Stage 1.5: Language Detection (if not provided by user)
+                detected_language = language
+                logger.info(f"Initial language parameter: {language.value}")
+                
+                if language == SupportedLanguage.ENGLISH:
+                    # Auto-detect language from document text
+                    logger.info("Stage 1.5: Auto-detecting document language (default was English)")
+                    try:
+                        # Take first 2000 characters for language detection
+                        sample_text = document_data["text"][:2000]
+                        logger.info(f"Sample text for detection (first 100 chars): {sample_text[:100]}")
+                        
+                        detection_result = await self.language_detection_service.detect_language_advanced(
+                            sample_text
+                        )
+                        detected_language = detection_result.language
+                        logger.info(f"✓ DETECTED LANGUAGE: {detected_language.value} (confidence: {detection_result.confidence:.2f}, method: {detection_result.method})")
+                        
+                        # Update document with detected language
+                        await self.firestore_client.update_document_status(
+                            doc_id, DocumentStatus.PROCESSING, 
+                            {
+                                "language": detected_language.value,
+                                "language_detection_confidence": detection_result.confidence,
+                                "language_detection_method": detection_result.method.value
+                            }
+                        )
+                    except Exception as e:
+                        logger.error(f"Language detection failed, defaulting to English: {e}", exc_info=True)
+                        detected_language = SupportedLanguage.ENGLISH
+                else:
+                    logger.info(f"Using user-provided language: {language.value}")
+                
+                # Use detected language for all subsequent processing
+                language = detected_language
+                logger.info(f"★ FINAL LANGUAGE FOR PROCESSING: {language.value} ★")
+                processing_result["stages_completed"].append("language_detection")
                 
                 # Stage 2: Privacy Analysis and PII Masking
                 logger.info("Stage 2: Privacy analysis and PII masking") 
@@ -157,7 +197,7 @@ class DocumentOrchestrator:
                 processing_result["stages_completed"].extend(["risk_analysis", "readability_analysis"])
                 
                 # Stage 7: Data Assembly and Storage
-                logger.info("Stage 7: Assembling and storing clause data")
+                logger.info(f"Stage 7: Assembling and storing clause data (language: {language.value})")
                 
                 clauses_data = []
                 for i, (clause, summary_result, risk_assessment, readability_comp) in enumerate(
@@ -192,6 +232,7 @@ class DocumentOrchestrator:
                 
                 # Store clauses in Firestore
                 clause_ids = await self.firestore_client.create_clauses(doc_id, clauses_data)
+                logger.info(f"✓ Stored {len(clause_ids)} clauses with language: {language.value}")
                 processing_result["stages_completed"].append("data_storage")
                 
                 # Stage 7.5: Generate Embeddings for Clauses (Background Processing)

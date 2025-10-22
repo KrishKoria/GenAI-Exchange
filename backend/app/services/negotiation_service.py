@@ -90,7 +90,7 @@ class NegotiationService:
         start_time = datetime.utcnow()
         
         with LogContext(logger, clause_category=clause_category, clause_risk_level=risk_level, has_context=bool(document_context)):
-            logger.info("Generating negotiation alternatives for clause")
+            logger.info(f"Generating negotiation alternatives for clause (language: {language.value})")
             
             try:
                 # Check cache first
@@ -276,6 +276,8 @@ class NegotiationService:
         }
         
         lang_config = language_configs.get(language, language_configs[SupportedLanguage.ENGLISH])
+        
+        logger.info(f"Building negotiation prompt with language: {language.value} ({lang_config['name']})")
         
         # Base system instructions
         prompt = (

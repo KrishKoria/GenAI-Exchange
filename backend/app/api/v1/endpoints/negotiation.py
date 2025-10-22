@@ -22,7 +22,7 @@ from app.models.negotiation import (
     QuickAlternativeRequest,
     QuickAlternativeResponse
 )
-from app.models.document import ClauseDetail, RiskLevel
+from app.models.document import ClauseDetail, RiskLevel, SupportedLanguage
 from app.services.negotiation_service import NegotiationService
 from app.services.firestore_client import FirestoreClient, FirestoreError
 from app.services.gemini_client import GeminiClient
@@ -74,14 +74,36 @@ async def generate_negotiation_alternatives(
         risk_level=request.risk_level,
         has_doc_context=bool(request.document_context)
     ):
-        logger.info("API request: Generate negotiation alternatives")
-        
+        requested_lang = request.language.value if request.language else 'None'
+        logger.info(f"API request: Generate negotiation alternatives (requested_language: {requested_lang})")
+
         try:
+            # If the client passed a clause_id, prefer the stored clause language in Firestore
+            language_to_use = request.language or SupportedLanguage.ENGLISH
+            if request.clause_id:
+                try:
+                    clause_data = None
+                    if request.doc_id:
+                        clause_data = await firestore_client.get_clause(request.doc_id, request.clause_id)
+                    else:
+                        logger.info("No doc_id provided in request; skipping stored clause language lookup")
+
+                    if clause_data and clause_data.get("language"):
+                        try:
+                            language_to_use = SupportedLanguage(clause_data.get("language"))
+                            logger.info(f"Overriding language from stored clause: {language_to_use.value}")
+                        except Exception:
+                            logger.warning(f"Stored clause language value is invalid: {clause_data.get('language')}")
+                except Exception as e:
+                    logger.warning(f"Could not fetch clause to determine language override: {e}")
+
+            logger.info(f"Negotiation will use language: {language_to_use.value}")
+
             response = await negotiation_service.generate_alternatives(
                 clause_text=request.clause_text,
                 clause_category=request.clause_category,
                 risk_level=request.risk_level,
-                language=request.language,
+                language=language_to_use,
                 document_context=request.document_context,
                 user_preferences=request.user_preferences
             )

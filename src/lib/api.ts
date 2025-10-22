@@ -399,7 +399,6 @@ export const documentApi = {
 
     return response.data;
   },
-
   /**
    * Get all items in the queue
    */
