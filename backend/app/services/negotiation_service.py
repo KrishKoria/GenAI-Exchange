@@ -12,7 +12,7 @@ import asyncio
 import uuid
 
 from app.core.logging import get_logger, LogContext
-from app.models.document import RiskLevel, ClauseDetail
+from app.models.document import RiskLevel, ClauseDetail, SupportedLanguage
 from app.models.negotiation import (
     NegotiationAlternative,
     NegotiationResponse,
@@ -69,6 +69,7 @@ class NegotiationService:
         clause_text: str,
         clause_category: Optional[str] = None,
         risk_level: Optional[RiskLevel] = None,
+        language: SupportedLanguage = SupportedLanguage.ENGLISH,
         document_context: Optional[Dict[str, Any]] = None,
         user_preferences: Optional[Dict[str, Any]] = None
     ) -> NegotiationResponse:
@@ -79,6 +80,7 @@ class NegotiationService:
             clause_text: The original clause text
             clause_category: Category of the clause (e.g., "Indemnity", "Liability")
             risk_level: Pre-assessed risk level (will analyze if not provided)
+            language: Language for generating alternatives (default: English)
             document_context: Additional context about the document
             user_preferences: User preferences for alternative generation
             
@@ -112,6 +114,7 @@ class NegotiationService:
                     clause_text=clause_text,
                     clause_category=clause_category,
                     risk_level=risk_level,
+                    language=language,
                     risk_assessment=risk_assessment,
                     document_context=document_context,
                     user_preferences=user_preferences
@@ -243,17 +246,44 @@ class NegotiationService:
         clause_text: str,
         clause_category: Optional[str],
         risk_level: RiskLevel,
+        language: SupportedLanguage,
         risk_assessment: Optional[RiskAssessment],
         document_context: Optional[Dict[str, Any]],
         user_preferences: Optional[Dict[str, Any]]
     ) -> str:
-        """Build the negotiation prompt for Gemini."""
+        """Build the negotiation prompt for Gemini with multilingual support."""
+        
+        # Language-specific configurations
+        language_configs = {
+            SupportedLanguage.ENGLISH: {
+                "name": "English",
+                "instructions": "Generate all alternatives, benefits, and notes in professional English.",
+                "example_benefit": "This version reduces liability exposure while maintaining reasonable cooperation terms",
+                "example_notes": "When proposing this change, emphasize the mutual benefit and fairness"
+            },
+            SupportedLanguage.HINDI: {
+                "name": "हिंदी (Hindi)",
+                "instructions": "सभी विकल्प, लाभ और नोट्स को पेशेवर हिंदी में उत्पन्न करें। कानूनी शब्दों को अंग्रेजी में रखें लेकिन स्पष्टीकरण हिंदी में दें।",
+                "example_benefit": "यह संस्करण देयता जोखिम को कम करता है जबकि उचित सहयोग शर्तों को बनाए रखता है",
+                "example_notes": "इस परिवर्तन का प्रस्ताव देते समय, पारस्परिक लाभ और निष्पक्षता पर जोर दें"
+            },
+            SupportedLanguage.BENGALI: {
+                "name": "বাংলা (Bengali)",
+                "instructions": "সমস্ত বিকল্প, সুবিধা এবং নোট পেশাদার বাংলায় তৈরি করুন। আইনি পদগুলি ইংরেজিতে রাখুন তবে ব্যাখ্যা বাংলায় দিন।",
+                "example_benefit": "এই সংস্করণ দায় এক্সপোজার হ্রাস করে যখন যুক্তিসঙ্গত সহযোগিতার শর্তাবলী বজায় রাখে",
+                "example_notes": "এই পরিবর্তনের প্রস্তাব করার সময়, পারস্পরিক সুবিধা এবং ন্যায্যতার উপর জোর দিন"
+            }
+        }
+        
+        lang_config = language_configs.get(language, language_configs[SupportedLanguage.ENGLISH])
         
         # Base system instructions
         prompt = (
             "You are an expert contract negotiation advisor helping users understand "
             "and negotiate better contract terms. Your role is to generate strategic "
             "alternatives to risky or unfavorable contract clauses.\n\n"
+            
+            f"LANGUAGE REQUIREMENT: {lang_config['instructions']}\n\n"
             
             "TASK: Generate exactly 3 distinct alternative versions of the provided clause, "
             "each with a different strategic approach:\n"
@@ -310,22 +340,23 @@ class NegotiationService:
             if "negotiation_style" in user_preferences:
                 prompt += f"- Negotiation Style: {user_preferences['negotiation_style']}\n"
         
-        # Add JSON schema
+        # Add JSON schema with language-specific examples
         prompt += (
-            "\n\nRESPONSE FORMAT (valid JSON array only):\n"
+            f"\n\nRESPONSE FORMAT (valid JSON array only):\n"
+            f"Generate responses in {lang_config['name']}. Example format:\n"
             "[\n"
             "  {\n"
-            '    "alternative_text": "Complete rewritten clause...",\n'
-            '    "strategic_benefit": "This version...",\n'
+            f'    "alternative_text": "Complete rewritten clause in {lang_config["name"]}...",\n'
+            f'    "strategic_benefit": "{lang_config["example_benefit"]}",\n'
             '    "risk_reduction": "Reduces risk by...",\n'
-            '    "implementation_notes": "When proposing this...",\n'
+            f'    "implementation_notes": "{lang_config["example_notes"]}",\n'
             '    "confidence": 0.85,\n'
             '    "alternative_type": "balanced"\n'
             "  },\n"
             "  ... (2 more alternatives with types: protective, simplified)\n"
             "]\n\n"
             
-            "Generate the 3 alternatives now as valid JSON:"
+            f"Generate the 3 alternatives now in {lang_config['name']} as valid JSON:"
         )
         
         return prompt

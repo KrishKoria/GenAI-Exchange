@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   Loader2,
   Copy,
@@ -40,6 +41,7 @@ export const NegotiationPanel: React.FC<NegotiationPanelProps> = ({
   onCopyAlternative,
   className = "",
 }) => {
+  const t = useTranslations();
   const [expandedAlternativeIds, setExpandedAlternativeIds] = useState<
     Set<string>
   >(new Set());
@@ -85,12 +87,7 @@ export const NegotiationPanel: React.FC<NegotiationPanelProps> = ({
   };
 
   const getAlternativeTypeLabel = (type: AlternativeType): string => {
-    const labels: Record<AlternativeType, string> = {
-      balanced: "Balanced Approach",
-      protective: "Protective Alternative",
-      simplified: "Simplified Version",
-    };
-    return labels[type] || type;
+    return t(`negotiation.alternativeTypes.${type}`);
   };
 
   // Loading state
@@ -99,10 +96,10 @@ export const NegotiationPanel: React.FC<NegotiationPanelProps> = ({
       <Card className={`p-6 ${className}`}>
         <div className="flex flex-col items-center justify-center space-y-4 py-8">
           <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-          <p className="text-sm text-gray-600">
-            Generating negotiation alternatives...
+          <p className="text-sm text-gray-600">{t("negotiation.generating")}</p>
+          <p className="text-xs text-gray-500">
+            {t("negotiation.generatingMessage")}
           </p>
-          <p className="text-xs text-gray-500">This may take a few seconds</p>
         </div>
       </Card>
     );
@@ -114,7 +111,7 @@ export const NegotiationPanel: React.FC<NegotiationPanelProps> = ({
       <Card className={`p-6 border-red-200 bg-red-50 ${className}`}>
         <div className="space-y-2">
           <h3 className="text-sm font-semibold text-red-900">
-            Failed to Generate Alternatives
+            {t("negotiation.errorTitle")}
           </h3>
           <p className="text-sm text-red-700">{error.message}</p>
           <p className="text-xs text-red-600">
@@ -132,10 +129,10 @@ export const NegotiationPanel: React.FC<NegotiationPanelProps> = ({
         <div className="text-center space-y-2 py-4">
           <Sparkles className="h-8 w-8 mx-auto text-gray-400" />
           <p className="text-sm text-gray-600">
-            Select a risky clause to generate negotiation alternatives
+            {t("negotiation.selectDocument")}
           </p>
           <p className="text-xs text-gray-500">
-            Get 3 strategic alternatives with implementation guidance
+            {t("negotiation.alternativeDescriptions.balanced")}
           </p>
         </div>
       </Card>
@@ -157,10 +154,11 @@ export const NegotiationPanel: React.FC<NegotiationPanelProps> = ({
           <div className="space-y-1">
             <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-blue-600" />
-              AI-Powered Negotiation Alternatives
+              {t("negotiation.title")}
             </h3>
             <p className="text-sm text-gray-600">
-              {alternatives.length} strategic alternatives generated
+              {alternatives.length}{" "}
+              {t("negotiation.alternatives").toLowerCase()}
             </p>
           </div>
           <div className="text-right">
@@ -177,7 +175,7 @@ export const NegotiationPanel: React.FC<NegotiationPanelProps> = ({
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-semibold text-gray-700">
-              Original Clause
+              {t("negotiation.originalClause")}
             </h4>
             <span
               className={`px-2 py-1 text-xs font-medium rounded-full ${
@@ -254,7 +252,7 @@ export const NegotiationPanel: React.FC<NegotiationPanelProps> = ({
                         )
                       }
                       className="h-8 w-8 p-0"
-                      title="Copy alternative text"
+                      title={t("negotiation.copyAlternative")}
                     >
                       {isCopied ? (
                         <Check className="h-4 w-4 text-green-600" />
@@ -270,7 +268,7 @@ export const NegotiationPanel: React.FC<NegotiationPanelProps> = ({
                         toggleExpanded(alternative.alternative_id)
                       }
                       className="h-8 w-8 p-0"
-                      title={isExpanded ? "Show less" : "Show more"}
+                      title={isExpanded ? t("common.close") : t("common.view")}
                     >
                       {isExpanded ? (
                         <ChevronUp className="h-4 w-4" />
@@ -294,10 +292,20 @@ export const NegotiationPanel: React.FC<NegotiationPanelProps> = ({
                 {/* Expanded Details */}
                 {isExpanded && (
                   <div className="mt-3 space-y-3 animate-in slide-in-from-top-2">
+                    {/* Strategic Benefit */}
+                    <div className="p-3 bg-white rounded-lg border border-gray-200">
+                      <div className="text-xs font-medium text-gray-600 mb-1">
+                        ✨ {t("negotiation.strategicBenefit")}
+                      </div>
+                      <p className="text-sm text-gray-700">
+                        {alternative.strategic_benefit}
+                      </p>
+                    </div>
+
                     {/* Risk Reduction */}
                     <div className="p-3 bg-white rounded-lg border border-gray-200">
                       <div className="text-xs font-medium text-gray-600 mb-1">
-                        🛡️ Risk Reduction
+                        🛡️ {t("negotiation.riskReduction")}
                       </div>
                       <p className="text-sm text-gray-700">
                         {alternative.risk_reduction}
@@ -307,7 +315,7 @@ export const NegotiationPanel: React.FC<NegotiationPanelProps> = ({
                     {/* Implementation Notes */}
                     <div className="p-3 bg-white rounded-lg border border-gray-200">
                       <div className="text-xs font-medium text-gray-600 mb-1">
-                        💡 Implementation Notes
+                        💡 {t("negotiation.implementationNotes")}
                       </div>
                       <p className="text-sm text-gray-700">
                         {alternative.implementation_notes}
@@ -324,7 +332,7 @@ export const NegotiationPanel: React.FC<NegotiationPanelProps> = ({
                         className="w-full"
                         variant="default"
                       >
-                        Select This Alternative
+                        {t("negotiation.selectAlternative")}
                       </Button>
                     )}
                   </div>

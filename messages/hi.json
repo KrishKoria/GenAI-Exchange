@@ -159,6 +159,38 @@
     "fileTypeInvalid": "केवल PDF फ़ाइलें समर्थित हैं",
     "processingError": "सर्वर पर दस्तावेज़ प्रसंस्करण विफल"
   },
+  "negotiation": {
+    "title": "बातचीत विकल्प",
+    "originalClause": "मूल खंड",
+    "generating": "विकल्प तैयार किए जा रहे हैं...",
+    "generatingMessage": "AI आपके खंड का विश्लेषण कर रहा है और रणनीतिक विकल्प तैयार कर रहा है...",
+    "errorTitle": "निर्माण विफल",
+    "errorMessage": "विकल्प तैयार करने में विफल। कृपया पुनः प्रयास करें।",
+    "noData": "कोई विकल्प उपलब्ध नहीं",
+    "selectDocument": "बातचीत विकल्प तैयार करने के लिए एक दस्तावेज़ चुनें",
+    "getAlternatives": "विकल्प प्राप्त करें",
+    "showAlternatives": "बातचीत विकल्प दिखाएं",
+    "closePanel": "बातचीत पैनल बंद करें",
+    "alternatives": "विकल्प",
+    "selectAlternative": "यह विकल्प चुनें",
+    "copyAlternative": "विकल्प पाठ कॉपी करें",
+    "copied": "कॉपी किया गया!",
+    "copy": "कॉपी",
+    "strategicBenefit": "रणनीतिक लाभ",
+    "riskReduction": "जोखिम में कमी",
+    "implementationNotes": "कार्यान्वयन नोट्स",
+    "confidence": "विश्वास",
+    "alternativeTypes": {
+      "balanced": "संतुलित दृष्टिकोण",
+      "protective": "सुरक्षात्मक विकल्प",
+      "simplified": "सरलीकृत संस्करण"
+    },
+    "alternativeDescriptions": {
+      "balanced": "एक मध्यम-मार्ग विकल्प जो मुख्य जोखिमों को संबोधित करता है जबकि उचित रहता है",
+      "protective": "एक अधिक सुरक्षात्मक विकल्प जो जोखिम को महत्वपूर्ण रूप से कम करता है",
+      "simplified": "एक स्पष्ट, सरल संस्करण जो अस्पष्टता को दूर करता है"
+    }
+  },
   "common": {
     "loading": "लोड हो रहा है...",
     "error": "त्रुटि",

@@ -81,6 +81,7 @@ async def generate_negotiation_alternatives(
                 clause_text=request.clause_text,
                 clause_category=request.clause_category,
                 risk_level=request.risk_level,
+                language=request.language,
                 document_context=request.document_context,
                 user_preferences=request.user_preferences
             )

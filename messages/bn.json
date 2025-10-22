@@ -159,6 +159,38 @@
     "fileTypeInvalid": "শুধুমাত্র PDF ফাইল সমর্থিত",
     "processingError": "সার্ভারে নথি প্রক্রিয়াকরণ ব্যর্থ"
   },
+  "negotiation": {
+    "title": "আলোচনার বিকল্প",
+    "originalClause": "মূল ধারা",
+    "generating": "বিকল্প তৈরি করা হচ্ছে...",
+    "generatingMessage": "AI আপনার ধারা বিশ্লেষণ করছে এবং কৌশলগত বিকল্প তৈরি করছে...",
+    "errorTitle": "তৈরি ব্যর্থ",
+    "errorMessage": "বিকল্প তৈরি করতে ব্যর্থ। অনুগ্রহ করে আবার চেষ্টা করুন।",
+    "noData": "কোন বিকল্প উপলব্ধ নেই",
+    "selectDocument": "আলোচনার বিকল্প তৈরি করতে একটি নথি নির্বাচন করুন",
+    "getAlternatives": "বিকল্প পান",
+    "showAlternatives": "আলোচনার বিকল্প দেখান",
+    "closePanel": "আলোচনা প্যানেল বন্ধ করুন",
+    "alternatives": "বিকল্প",
+    "selectAlternative": "এই বিকল্পটি নির্বাচন করুন",
+    "copyAlternative": "বিকল্প পাঠ্য অনুলিপি করুন",
+    "copied": "অনুলিপি করা হয়েছে!",
+    "copy": "অনুলিপি",
+    "strategicBenefit": "কৌশলগত সুবিধা",
+    "riskReduction": "ঝুঁকি হ্রাস",
+    "implementationNotes": "বাস্তবায়ন নোট",
+    "confidence": "আত্মবিশ্বাস",
+    "alternativeTypes": {
+      "balanced": "ভারসাম্যপূর্ণ পদ্ধতি",
+      "protective": "সুরক্ষামূলক বিকল্প",
+      "simplified": "সরলীকৃত সংস্করণ"
+    },
+    "alternativeDescriptions": {
+      "balanced": "একটি মধ্যম-পথের বিকল্প যা প্রধান ঝুঁকিগুলিকে সম্বোধন করে যখন যুক্তিসঙ্গত থাকে",
+      "protective": "একটি আরও সুরক্ষামূলক বিকল্প যা ঝুঁকি উল্লেখযোগ্যভাবে হ্রাস করে",
+      "simplified": "একটি স্পষ্ট, সরল সংস্করণ যা অস্পষ্টতা দূর করে"
+    }
+  },
   "common": {
     "loading": "লোড হচ্ছে...",
     "error": "ত্রুটি",

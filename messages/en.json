@@ -159,6 +159,38 @@
     "fileTypeInvalid": "Only PDF files are supported",
     "processingError": "Document processing failed on the server"
   },
+  "negotiation": {
+    "title": "Negotiation Alternatives",
+    "originalClause": "Original Clause",
+    "generating": "Generating alternatives...",
+    "generatingMessage": "AI is analyzing your clause and generating strategic alternatives...",
+    "errorTitle": "Generation Failed",
+    "errorMessage": "Failed to generate alternatives. Please try again.",
+    "noData": "No alternatives available",
+    "selectDocument": "Select a document to generate negotiation alternatives",
+    "getAlternatives": "Get Alternatives",
+    "showAlternatives": "Show Negotiation Alternatives",
+    "closePanel": "Close negotiation panel",
+    "alternatives": "Alternatives",
+    "selectAlternative": "Select this alternative",
+    "copyAlternative": "Copy alternative text",
+    "copied": "Copied!",
+    "copy": "Copy",
+    "strategicBenefit": "Strategic Benefit",
+    "riskReduction": "Risk Reduction",
+    "implementationNotes": "Implementation Notes",
+    "confidence": "Confidence",
+    "alternativeTypes": {
+      "balanced": "Balanced Approach",
+      "protective": "Protective Alternative",
+      "simplified": "Simplified Version"
+    },
+    "alternativeDescriptions": {
+      "balanced": "A middle-ground alternative that addresses the main risks while remaining reasonable",
+      "protective": "A more protective alternative that significantly reduces risk",
+      "simplified": "A clearer, simpler version that removes ambiguity"
+    }
+  },
   "common": {
     "loading": "Loading...",
     "error": "Error",

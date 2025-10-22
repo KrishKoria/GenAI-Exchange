@@ -7,7 +7,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.document import RiskLevel
+from app.models.document import RiskLevel, SupportedLanguage
 
 
 class AlternativeType(str, Enum):
@@ -34,6 +34,10 @@ class NegotiationRequest(BaseModel):
     clause_text: str = Field(description="The original clause text to generate alternatives for")
     clause_category: Optional[str] = Field(default=None, description="Category of the clause")
     risk_level: Optional[RiskLevel] = Field(default=None, description="Pre-assessed risk level")
+    language: SupportedLanguage = Field(
+        default=SupportedLanguage.ENGLISH,
+        description="Language for generating alternatives"
+    )
     document_context: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Additional context about the document"

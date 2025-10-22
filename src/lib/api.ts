@@ -78,6 +78,7 @@ export interface ClauseSummary {
   category: string;
   risk_level: RiskLevel;
   summary: string;
+  language?: string;
   readability_metrics: ReadabilityMetrics;
   needs_review: boolean;
 }
@@ -97,6 +98,7 @@ export interface ClauseDetail {
   risk_level: RiskLevel;
   original_text: string;
   summary: string;
+  language?: string;
   readability_metrics: ReadabilityMetrics;
   needs_review: boolean;
   negotiation_tip?: string;
@@ -702,6 +704,7 @@ export interface NegotiationRequest {
   clause_text: string;
   clause_category?: string;
   risk_level?: RiskLevel;
+  language?: string;
   document_context?: Record<string, unknown>;
   user_preferences?: Record<string, unknown>;
   clause_id?: string;

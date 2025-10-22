@@ -118,6 +118,7 @@ export const useNegotiationState = ({
         clause_id: clauseId,
         doc_id: currentDocId,
         risk_level: riskLevel as RiskLevel,
+        language: clause.language || "en", // Pass document language for multilingual alternatives
       });
 
       // Add automated message to chat about the generated alternatives
