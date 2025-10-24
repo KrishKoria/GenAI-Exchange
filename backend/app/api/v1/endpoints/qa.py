@@ -16,6 +16,8 @@ from app.core.config import Settings, get_settings
 from app.models.qa import QuestionRequest, AnswerResponse, SourceCitation
 from app.models.chat import MessageRole, AddMessageRequest
 from app.models.document import SupportedLanguage
+from app.models.analytics import QuestionAskedEvent
+from app.services.analytics_service import get_analytics_service
 from app.services.firestore_client import FirestoreClient, FirestoreError
 from app.services.embeddings_service import EmbeddingsService, EmbeddingsError
 from app.services.gemini_client import GeminiClient, GeminiError
@@ -61,6 +63,7 @@ async def ask_question(
     Raises:
         HTTPException: If document not found or question invalid
     """
+    start_time = datetime.now()
     logger.info(f"Q&A request for doc_id: {request.doc_id}")
 
     if not request.question.strip():
@@ -304,6 +307,30 @@ async def ask_question(
                     }
                 )
             )
+        
+        # Publish analytics event for question asked
+        try:
+            response_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+            analytics_service = get_analytics_service()
+            
+            # Hash question for privacy (no PII in events)
+            question_hash = hashlib.sha256(request.question.encode('utf-8')).hexdigest()
+            
+            event = QuestionAskedEvent(
+                question_hash=question_hash,
+                answer_confidence=qa_result.get("confidence", 0.0),
+                citation_count=len(sources),
+                response_time_ms=response_time_ms,
+                session_id=chat_session_id
+            )
+            
+            # Publish asynchronously (fire-and-forget)
+            analytics_service.publish_event(event)
+            logger.debug(f"Published QuestionAskedEvent (hash: {question_hash[:8]}...)")
+            
+        except Exception as analytics_error:
+            # Don't fail Q&A if analytics fails
+            logger.error(f"Failed to publish QuestionAskedEvent: {analytics_error}")
         
         return AnswerResponse(
             answer=qa_result.get("answer", ""),

@@ -2,12 +2,15 @@
 Document processing orchestrator that coordinates all services
 """
 import asyncio
+import hashlib
 from typing import Dict, Any, List, Optional
 from uuid import uuid4
 from datetime import datetime
 
 from app.core.logging import get_logger, LogContext, log_execution_time
 from app.models.document import DocumentStatus, RiskLevel, SupportedLanguage
+from app.models.analytics import DocumentUploadedEvent, ClauseAnalyzedEvent, RiskDetectedEvent
+from app.services.analytics_service import get_analytics_service
 from app.services.document_processor_grpc import DocumentProcessorGRPC, DocumentProcessingError
 from app.services.document_processor_http import DocumentProcessor as DocumentProcessorHTTP
 from app.services.clause_segmenter import ClauseSegmenter, ClauseCandidate
@@ -235,6 +238,43 @@ class DocumentOrchestrator:
                 logger.info(f"✓ Stored {len(clause_ids)} clauses with language: {language.value}")
                 processing_result["stages_completed"].append("data_storage")
                 
+                # Publish analytics events for clause analysis
+                try:
+                    analytics_service = get_analytics_service()
+                    
+                    for clause_data in clauses_data:
+                        # Publish ClauseAnalyzedEvent for all clauses
+                        event = ClauseAnalyzedEvent(
+                            clause_id=clause_data["clause_id"],
+                            doc_id=doc_id,
+                            category=clause_data["category"],
+                            risk_level=clause_data["risk_level"],
+                            risk_score=clause_data["metadata"]["risk_score"],
+                            confidence=clause_data["confidence"],
+                            readability_delta=clause_data["readability_metrics"]["delta"],
+                            session_id=session_id
+                        )
+                        analytics_service.publish_event(event)
+                        
+                        # Publish RiskDetectedEvent for high-risk clauses (risk_score >= 0.7)
+                        if clause_data["metadata"]["risk_score"] >= 0.7:
+                            risk_event = RiskDetectedEvent(
+                                clause_id=clause_data["clause_id"],
+                                doc_id=doc_id,
+                                risk_level=clause_data["risk_level"],
+                                risk_score=clause_data["metadata"]["risk_score"],
+                                risk_factors=clause_data["risk_factors"],
+                                category=clause_data["category"],
+                                session_id=session_id
+                            )
+                            analytics_service.publish_event(risk_event)
+                    
+                    logger.debug(f"Published {len(clauses_data)} ClauseAnalyzedEvents")
+                    
+                except Exception as analytics_error:
+                    # Don't fail document processing if analytics fails
+                    logger.error(f"Failed to publish analytics events: {analytics_error}")
+                
                 # Stage 7.5: Generate Embeddings for Clauses (Background Processing)
                 logger.info("Stage 7.5: Starting background embeddings generation")
                 
@@ -282,6 +322,31 @@ class DocumentOrchestrator:
                 log_execution_time(logger, "complete_document_processing", total_time)
                 
                 logger.info(f"Document processing completed successfully: {len(clause_ids)} clauses processed")
+                
+                # Publish analytics event for document upload
+                try:
+                    analytics_service = get_analytics_service()
+                    
+                    # Hash filename for privacy (no PII in events)
+                    filename_hash = hashlib.sha256(filename.encode('utf-8')).hexdigest()[:16]
+                    
+                    event = DocumentUploadedEvent(
+                        doc_id=doc_id,
+                        filename_hash=filename_hash,
+                        page_count=document_data["page_count"],
+                        language=detected_language.value,
+                        processing_time_ms=int(total_time),
+                        status="success",
+                        session_id=session_id
+                    )
+                    
+                    # Publish asynchronously (fire-and-forget)
+                    analytics_service.publish_event(event)
+                    logger.debug(f"Published DocumentUploadedEvent for doc {doc_id}")
+                    
+                except Exception as analytics_error:
+                    # Don't fail document processing if analytics fails
+                    logger.error(f"Failed to publish DocumentUploadedEvent: {analytics_error}")
                 
                 return processing_result
                 
