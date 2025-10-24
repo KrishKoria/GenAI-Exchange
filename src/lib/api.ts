@@ -856,11 +856,40 @@ export const negotiationApi = {
   },
 };
 
+// ==================== Analytics API ====================
+
+export const fetchMetricsSummary = async (hours: number = 24) => {
+  const response = await apiClient.get(`/api/v1/metrics/summary`, {
+    params: { hours },
+  });
+  return response.data;
+};
+
+export const fetchMetricsTrends = async (
+  hours: number = 24,
+  granularity: "hourly" | "daily" = "hourly"
+) => {
+  const response = await apiClient.get(`/api/v1/metrics/trends`, {
+    params: { hours, granularity },
+  });
+  return response.data;
+};
+
+export const fetchMetricsDetails = async (hours: number = 24) => {
+  const response = await apiClient.get(`/api/v1/metrics/details`, {
+    params: { hours },
+  });
+  return response.data;
+};
+
 const apiExports = {
   documentApi,
   qaApi,
   chatSessionApi,
   negotiationApi,
+  fetchMetricsSummary,
+  fetchMetricsTrends,
+  fetchMetricsDetails,
   generateRiskHeatmap,
   getTopRiskyClauses,
   formatProcessingMessage,

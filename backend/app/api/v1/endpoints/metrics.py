@@ -8,69 +8,127 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, Query
 
 from app.core.config import Settings, get_settings
+from app.models.metrics import MetricsSummary, MetricsTrends, MetricsDetails
+from app.services.metrics_service import get_metrics_service, MetricsService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.get("/summary", response_model=Dict[str, Any])
+@router.get("/summary", response_model=MetricsSummary)
 async def get_metrics_summary(
-    days: int = Query(default=7, ge=1, le=30, description="Number of days to analyze"),
-    settings: Settings = Depends(get_settings)
-) -> Dict[str, Any]:
+    hours: int = Query(default=24, ge=1, le=168, description="Number of hours to analyze (max 7 days)"),
+    settings: Settings = Depends(get_settings),
+    metrics_service: MetricsService = Depends(get_metrics_service)
+) -> MetricsSummary:
     """
-    Get aggregated metrics summary for the dashboard.
+    Get aggregated metrics summary for the analytics dashboard.
+    
+    Retrieves real-time metrics from BigQuery including:
+    - Total counts for documents, clauses, questions, risks
+    - Average processing times and confidence scores
+    - High-risk percentage
     
     Args:
-        days: Number of days to analyze (1-30)
+        hours: Number of hours to analyze (1-168, default: 24)
         
     Returns:
-        Aggregated KPIs and metrics
+        MetricsSummary: Aggregated KPIs and statistics
     """
-    # TODO: Query BigQuery for real metrics
+    logger.info(f"Fetching metrics summary for last {hours} hours")
     
-    # Placeholder metrics based on PROJECT_OUTLINE KPIs
-    return {
-        "time_range": {
-            "start_date": (datetime.now() - timedelta(days=days)).isoformat(),
-            "end_date": datetime.now().isoformat(),
-            "days": days
-        },
-        "document_processing": {
-            "total_documents": 42,
-            "total_clauses": 287,
-            "avg_processing_time_ms": 3450,
-            "success_rate": 0.96
-        },
-        "readability_improvement": {
-            "avg_grade_reduction": 4.2,
-            "avg_flesch_improvement": 23.7,
-            "documents_improved": 40
-        },
-        "risk_analysis": {
-            "risk_distribution": {
-                "low": 156,
-                "moderate": 89,
-                "attention": 42
-            },
-            "top_risk_categories": [
-                {"category": "Indemnity", "count": 15, "avg_risk": 0.78},
-                {"category": "Liability Limitation", "count": 12, "avg_risk": 0.71},
-                {"category": "Auto-Renewal", "count": 8, "avg_risk": 0.65}
-            ]
-        },
-        "qa_analytics": {
-            "total_questions": 125,
-            "avg_confidence": 0.82,
-            "citation_coverage": 0.94,
-            "avg_response_time_ms": 1250
-        },
-        "privacy_metrics": {
-            "pii_detection_success": 0.98,
-            "documents_masked": 38,
-            "dlp_api_usage": 0.87
-        }
-    }
+    try:
+        summary = await metrics_service.get_summary_metrics(hours=hours)
+        logger.info(f"Retrieved summary: {summary.total_documents} docs, {summary.total_clauses} clauses")
+        return summary
+    except Exception as e:
+        logger.error(f"Failed to fetch metrics summary: {e}", exc_info=True)
+        # Return empty metrics on error
+        return MetricsSummary(
+            total_documents=0,
+            total_clauses=0,
+            total_questions=0,
+            total_risks=0,
+            avg_processing_time_ms=0.0,
+            avg_response_time_ms=0.0,
+            avg_confidence=0.0,
+            high_risk_percentage=0.0,
+            period_start=datetime.utcnow() - timedelta(hours=hours),
+            period_end=datetime.utcnow()
+        )
+
+
+@router.get("/trends", response_model=MetricsTrends)
+async def get_metrics_trends(
+    hours: int = Query(default=24, ge=1, le=168, description="Number of hours to analyze"),
+    granularity: str = Query(default="hourly", regex="^(hourly|daily)$", description="Time bucket granularity"),
+    metrics_service: MetricsService = Depends(get_metrics_service)
+) -> MetricsTrends:
+    """
+    Get time series trends for analytics visualization.
+    
+    Provides hourly or daily aggregated data for charts:
+    - Event count trends by type
+    - Processing/response time trends
+    - Confidence score trends
+    - Risk and category distributions
+    
+    Args:
+        hours: Number of hours to analyze (1-168)
+        granularity: Time bucket size - 'hourly' or 'daily'
+        
+    Returns:
+        MetricsTrends: Time series data for visualization
+    """
+    logger.info(f"Fetching metrics trends: {hours}h, {granularity}")
+    
+    try:
+        trends = await metrics_service.get_trends(hours=hours, granularity=granularity)
+        return trends
+    except Exception as e:
+        logger.error(f"Failed to fetch metrics trends: {e}", exc_info=True)
+        # Return empty trends on error
+        return MetricsTrends(
+            event_trends=[],
+            processing_time_trend=[],
+            response_time_trend=[],
+            confidence_trend=[],
+            risk_distribution={},
+            category_distribution={},
+            period_start=datetime.utcnow() - timedelta(hours=hours),
+            period_end=datetime.utcnow(),
+            granularity=granularity
+        )
+
+
+@router.get("/details", response_model=MetricsDetails)
+async def get_metrics_details(
+    hours: int = Query(default=24, ge=1, le=168, description="Number of hours to analyze"),
+    metrics_service: MetricsService = Depends(get_metrics_service)
+) -> MetricsDetails:
+    """
+    Get detailed metrics with breakdowns and distributions.
+    
+    Provides comprehensive analytics including:
+    - Summary metrics
+    - Risk level distribution
+    - Top 10 clause categories
+    - Recent documents and high-risk detections
+    
+    Args:
+        hours: Number of hours to analyze (1-168)
+        
+    Returns:
+        MetricsDetails: Comprehensive analytics data
+    """
+    logger.info(f"Fetching detailed metrics for last {hours} hours")
+    
+    try:
+        details = await metrics_service.get_detailed_metrics(hours=hours)
+        return details
+    except Exception as e:
+        logger.error(f"Failed to fetch detailed metrics: {e}", exc_info=True)
+        raise
 
 
 @router.get("/processing-stats")
