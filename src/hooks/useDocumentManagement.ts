@@ -23,14 +23,58 @@ export interface UseDocumentManagementReturn {
   updateDocumentStatus: (docId: string, status: string) => void;
 }
 
+// localStorage key for document persistence
+const STORAGE_KEY = "clausecompass_documents";
+
+// Helper function to safely load documents from localStorage
+const loadDocumentsFromStorage = (): Document[] => {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (!stored) return [];
+
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error("Failed to load documents from localStorage:", error);
+    return [];
+  }
+};
+
+// Helper function to safely save documents to localStorage
+const saveDocumentsToStorage = (docs: Document[]): void => {
+  if (typeof window === "undefined") return;
+
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(docs));
+  } catch (error) {
+    console.error("Failed to save documents to localStorage:", error);
+  }
+};
+
 /**
- * Hook for managing document selection, filtering, and state
+ * Hook for managing document selection, filtering, and state.
+ *
+ * Documents are persisted to localStorage for privacy - raw documents are NEVER
+ * stored on the backend. Only analysis results (clauses, risk scores) are stored
+ * in Firestore, not the original document content.
  */
 export const useDocumentManagement = (): UseDocumentManagementReturn => {
+  // Initialize with empty array to avoid hydration mismatch
+  // Load from localStorage after mount in useEffect
   const [recentDocs, setRecentDocs] = useState<Document[]>([]);
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
   const [currentDocId, setCurrentDocId] = useState<string | null>(null);
   const [docQuery, setDocQuery] = useState("");
+
+  // Load documents from localStorage after component mounts (client-side only)
+  useEffect(() => {
+    const storedDocs = loadDocumentsFromStorage();
+    if (storedDocs.length > 0) {
+      setRecentDocs(storedDocs);
+    }
+  }, []); // Run once on mount
 
   // Filter documents based on search query
   const filteredDocs = useMemo(() => {
@@ -67,6 +111,11 @@ export const useDocumentManagement = (): UseDocumentManagementReturn => {
       prev.map((doc) => (doc.id === docId ? { ...doc, status } : doc))
     );
   }, []);
+
+  // Persist documents to localStorage whenever recentDocs changes
+  useEffect(() => {
+    saveDocumentsToStorage(recentDocs);
+  }, [recentDocs]);
 
   // Update current document when selection changes
   useEffect(() => {

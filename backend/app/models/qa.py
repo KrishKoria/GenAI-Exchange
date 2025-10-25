@@ -29,6 +29,8 @@ class SourceCitation(BaseModel):
     category: Optional[str] = Field(description="Clause category", default=None)
     snippet: str = Field(description="Relevant text snippet from clause")
     relevance_score: float = Field(description="Relevance score", ge=0, le=1)
+    doc_id: Optional[str] = Field(description="Source document identifier", default=None)
+    doc_name: Optional[str] = Field(description="Source document name", default=None)
 
 
 class AnswerResponse(BaseModel):

@@ -72,7 +72,6 @@ export function LocaleProvider({
         messages={messages}
         locale={locale}
         timeZone="Asia/Kolkata"
-        now={new Date()}
       >
         {children}
       </NextIntlClientProvider>

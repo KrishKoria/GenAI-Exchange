@@ -137,71 +137,85 @@ async def ask_question(
                 )
             )
         
-        # 1. Verify document exists and get its clauses (with caching)
-        logger.info(f"Fetching clauses for document: {request.doc_id}")
+        # 1. Determine which documents to query
+        # If using chat session with multiple documents, query all of them
+        # Otherwise, just query the single doc_id
+        doc_ids_to_query = [request.doc_id]
         
-        # Check cache first
-        cache_key = CacheKeys.document_clauses(request.doc_id)
-        clauses = await cache_service.get(cache_key)
+        if request.chat_session_id and request.use_conversation_memory:
+            try:
+                # Get session to access selected documents
+                session = await chat_session_service.get_session(request.chat_session_id)
+                if session and session.selected_documents:
+                    doc_ids_to_query = [doc.doc_id for doc in session.selected_documents]
+                    logger.info(f"Chat session has {len(doc_ids_to_query)} documents selected: {doc_ids_to_query}")
+            except Exception as e:
+                logger.warning(f"Failed to get session documents, using single doc_id: {e}")
         
-        if clauses is None:
-            # Cache miss - fetch from Firestore
-            logger.info(f"Cache miss for document clauses: {request.doc_id}")
-            clauses = await firestore_client.get_document_clauses(request.doc_id)
+        # 2. Fetch clauses from all selected documents (with caching)
+        all_clauses = []
+        doc_id_to_name = {}  # Map doc_id to document name for source attribution
+        
+        for doc_id in doc_ids_to_query:
+            logger.info(f"Fetching clauses for document: {doc_id}")
             
-            # Cache the result for future requests (cache for 30 minutes)
+            # Check cache first
+            cache_key = CacheKeys.document_clauses(doc_id)
+            clauses = await cache_service.get(cache_key)
+            
+            if clauses is None:
+                # Cache miss - fetch from Firestore
+                logger.info(f"Cache miss for document clauses: {doc_id}")
+                clauses = await firestore_client.get_document_clauses(doc_id)
+                
+                # Cache the result for future requests (cache for 30 minutes)
+                if clauses:
+                    await cache_service.set(cache_key, clauses, ttl=1800)
+                    logger.info(f"Cached {len(clauses)} clauses for document: {doc_id}")
+            else:
+                logger.info(f"Cache hit for document clauses: {doc_id} ({len(clauses)} clauses)")
+            
             if clauses:
-                await cache_service.set(cache_key, clauses, ttl=1800)
-                logger.info(f"Cached {len(clauses)} clauses for document: {request.doc_id}")
-        else:
-            logger.info(f"Cache hit for document clauses: {request.doc_id} ({len(clauses)} clauses)")
+                # Add doc_id and doc_name to each clause for source attribution
+                doc_name = None
+                try:
+                    doc = await firestore_client.get_document(doc_id)
+                    if doc:
+                        doc_name = doc.get('filename', doc_id)
+                        doc_id_to_name[doc_id] = doc_name
+                except Exception as e:
+                    logger.warning(f"Could not fetch document name for {doc_id}: {e}")
+                    doc_name = doc_id
+                    doc_id_to_name[doc_id] = doc_id
+                
+                for clause in clauses:
+                    clause['source_doc_id'] = doc_id
+                    clause['doc_name'] = doc_name
+                all_clauses.extend(clauses)
         
-        if not clauses:
+        if not all_clauses:
             raise HTTPException(
                 status_code=404, 
-                detail=f"No clauses found for document {request.doc_id}"
+                detail=f"No clauses found for the selected documents"
             )
         
-        # 2. Filter clauses that have embeddings (should be pre-generated during document processing)
+        logger.info(f"Total clauses from {len(doc_ids_to_query)} documents: {len(all_clauses)}")
+        
+        # 3. Filter clauses that have embeddings (should be pre-generated during document processing)
         clauses_with_embeddings = [
-            clause for clause in clauses 
+            clause for clause in all_clauses 
             if clause.get("embedding") and len(clause.get("embedding", [])) > 0
         ]
         
         if not clauses_with_embeddings:
             # Embeddings should have been generated during document processing
             # If they're missing, this indicates a processing failure or incomplete pipeline
-            logger.warning(f"No embeddings found for document {request.doc_id}. Document may be incompletely processed.")
+            logger.warning(f"No embeddings found for selected documents. Documents may be incompletely processed.")
             
-            # Check document status to understand why embeddings are missing
-            document = await firestore_client.get_document(request.doc_id)
-            if document and document.get("status") != "completed":
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Document is not fully processed yet. Current status: {document.get('status', 'unknown')}. Please wait for processing to complete."
-                )
-            
-            # If document is marked complete but missing embeddings, try to generate them as fallback
-            logger.warning("Document marked as complete but missing embeddings. Generating embeddings as fallback.")
-            try:
-                await _generate_and_store_embeddings(
-                    firestore_client, 
-                    embeddings_service, 
-                    request.doc_id, 
-                    clauses
-                )
-                # Reload clauses with embeddings
-                clauses = await firestore_client.get_document_clauses(request.doc_id)
-                clauses_with_embeddings = [
-                    clause for clause in clauses 
-                    if clause.get("embedding") and len(clause.get("embedding", [])) > 0
-                ]
-            except Exception as fallback_error:
-                logger.error(f"Fallback embeddings generation failed: {fallback_error}")
-                raise HTTPException(
-                    status_code=500,
-                    detail="Document processing is incomplete. Embeddings are missing and could not be generated. Please re-upload the document."
-                )
+            raise HTTPException(
+                status_code=422,
+                detail=f"One or more documents are not fully processed yet. Please wait for processing to complete before asking questions."
+            )
         
         if not clauses_with_embeddings:
             raise HTTPException(
@@ -210,13 +224,45 @@ async def ask_question(
             )
         
         # 3. Find most relevant clauses using vector similarity
+        # For multi-document queries, use per-document top-K to ensure each document is represented
         logger.info(f"Searching {len(clauses_with_embeddings)} clauses for relevance")
-        relevant_clauses = await embeddings_service.search_similar_clauses(
-            question=request.question,
-            clause_embeddings=clauses_with_embeddings,
-            top_k=5,  # Get top 5 most relevant clauses
-            min_similarity=0.2  # Minimum similarity threshold
-        )
+        
+        if len(doc_ids_to_query) > 1:
+            # Multi-document query: get top-K from EACH document to ensure representation
+            logger.info(f"Multi-document query detected ({len(doc_ids_to_query)} docs) - using per-document top-K strategy")
+            relevant_clauses = []
+            clauses_per_doc = 3  # Get top 3 from each document
+            
+            # Group clauses by document
+            clauses_by_doc = {}
+            for clause in clauses_with_embeddings:
+                doc_id = clause.get('source_doc_id', request.doc_id)
+                if doc_id not in clauses_by_doc:
+                    clauses_by_doc[doc_id] = []
+                clauses_by_doc[doc_id].append(clause)
+            
+            # Get top-K from each document
+            for doc_id, doc_clauses in clauses_by_doc.items():
+                doc_name = doc_id_to_name.get(doc_id, doc_id)
+                logger.info(f"Searching {len(doc_clauses)} clauses from document: {doc_name}")
+                
+                doc_relevant = await embeddings_service.search_similar_clauses(
+                    question=request.question,
+                    clause_embeddings=doc_clauses,
+                    top_k=clauses_per_doc,
+                    min_similarity=0.2
+                )
+                
+                logger.info(f"Found {len(doc_relevant)} relevant clauses from {doc_name}")
+                relevant_clauses.extend(doc_relevant)
+        else:
+            # Single document query: use global top-K
+            relevant_clauses = await embeddings_service.search_similar_clauses(
+                question=request.question,
+                clause_embeddings=clauses_with_embeddings,
+                top_k=5,  # Get top 5 most relevant clauses
+                min_similarity=0.2  # Minimum similarity threshold
+            )
         
         if not relevant_clauses:
             # No relevant clauses found, return informative response
@@ -272,12 +318,18 @@ async def ask_question(
                 original_text = clause.get("original_text", "")
                 snippet = original_text[:300] + "..." if len(original_text) > 300 else original_text
                 
+                # Get document info for this clause
+                source_doc_id = clause.get("source_doc_id", request.doc_id)
+                source_doc_name = doc_id_to_name.get(source_doc_id, source_doc_id)
+                
                 sources.append(SourceCitation(
                     clause_id=clause["clause_id"],
                     clause_number=clause.get("order"),  # Use 'order' field as clause number
                     category=clause.get("category"),
                     snippet=snippet,
-                    relevance_score=clause.get("similarity", 0.0)  # Use 'similarity' not 'similarity_score'
+                    relevance_score=clause.get("similarity", 0.0),  # Use 'similarity' not 'similarity_score'
+                    doc_id=source_doc_id,
+                    doc_name=source_doc_name
                 ))
         
         # 6. Move background operations to background tasks for better performance

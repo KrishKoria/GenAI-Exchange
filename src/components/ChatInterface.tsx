@@ -127,6 +127,8 @@ export interface ChatMessage {
     category?: string;
     snippet: string;
     relevance_score: number;
+    doc_id?: string;
+    doc_name?: string;
   }>;
   feedback?: "positive" | "negative" | null;
 }
@@ -173,8 +175,14 @@ export const ChatInterface = ({
   const [isComposing, setIsComposing] = useState(false);
   const [showTypingHint, setShowTypingHint] = useState(false);
   const [typingTimer, setTypingTimer] = useState<NodeJS.Timeout | null>(null);
+  const [isMounted, setIsMounted] = useState(false); // Track client-side mount for hydration
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Set mounted flag after hydration to prevent timestamp mismatch
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -225,7 +233,9 @@ export const ChatInterface = ({
   };
 
   const formatTimestamp = (timestamp?: Date) => {
-    if (!timestamp) return "";
+    // Don't render timestamps during SSR to prevent hydration mismatch
+    if (!isMounted || !timestamp) return "";
+
     return new Intl.DateTimeFormat("en-US", {
       hour: "2-digit",
       minute: "2-digit",
@@ -348,6 +358,8 @@ export const ChatInterface = ({
                                   category?: string;
                                   snippet: string;
                                   relevance_score: number;
+                                  doc_id?: string;
+                                  doc_name?: string;
                                 },
                                 idx: number
                               ) => (
@@ -356,11 +368,18 @@ export const ChatInterface = ({
                                   className="text-xs text-white/60 border-l-2 border-purple-500/30 pl-2"
                                 >
                                   <div className="flex items-center justify-between mb-1">
-                                    <span className="font-medium">
-                                      {source.clause_number && source.category
-                                        ? `Clause ${source.clause_number} (${source.category})`
-                                        : `Source ${idx + 1}`}
-                                    </span>
+                                    <div className="flex flex-col gap-0.5">
+                                      <span className="font-medium">
+                                        {source.clause_number && source.category
+                                          ? `Clause ${source.clause_number} (${source.category})`
+                                          : `Source ${idx + 1}`}
+                                      </span>
+                                      {source.doc_name && (
+                                        <span className="text-[10px] text-white/40">
+                                          📄 {source.doc_name}
+                                        </span>
+                                      )}
+                                    </div>
                                     <span className="text-purple-400">
                                       {source.relevance_score > 0
                                         ? `${Math.round(

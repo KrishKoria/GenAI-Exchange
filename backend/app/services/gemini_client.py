@@ -549,6 +549,12 @@ ANSWER GUIDELINES:
 • Use clear, professional language that is easy to understand
 • Focus on helping users understand their rights and obligations
 
+MULTI-DOCUMENT HANDLING:
+• When clauses come from multiple documents, ALWAYS consider information from ALL documents
+• Synthesize information across documents to provide comprehensive answers
+• Cite which document each piece of information comes from when relevant
+• Compare or contrast information from different documents when appropriate
+
 CLAUSE REFERENCING RULES:
 • Always use "Clause X (Category)" format when citing clauses
 • Examples: "Clause 1 (Terms)", "Clause 5 (Termination)", "Clause 8 (Payment)"
@@ -569,15 +575,43 @@ Always output in strict JSON format only."""
         relevant_clauses: List[Dict[str, Any]],
         language: SupportedLanguage = SupportedLanguage.ENGLISH
     ) -> str:
-        """Build user prompt for Q&A with language support."""
+        """Build user prompt for Q&A with language support and multi-document awareness."""
 
-        clauses_text = "CLAUSES:\n"
-        for i, clause in enumerate(relevant_clauses):
-            clause_order = clause.get('order', i + 1)
-            clause_category = clause.get('category', 'Unknown')
-            clauses_text += f"Clause {clause_order} ({clause_category}):\n"
-            clauses_text += f"Summary: {clause.get('summary', '')}\n"
-            clauses_text += f"Original: {clause.get('original_text', '')[:500]}...\n\n"
+        # Group clauses by document for better context
+        docs_clauses = {}
+        for clause in relevant_clauses:
+            doc_id = clause.get('source_doc_id', 'unknown')
+            if doc_id not in docs_clauses:
+                docs_clauses[doc_id] = []
+            docs_clauses[doc_id].append(clause)
+        
+        # Build clauses text with document separation
+        clauses_text = ""
+        if len(docs_clauses) > 1:
+            clauses_text += "IMPORTANT: The following clauses come from MULTIPLE DOCUMENTS. You should consider information from ALL documents when answering.\n\n"
+            
+            for doc_id, doc_clauses in docs_clauses.items():
+                # Get document name if available
+                doc_name = doc_clauses[0].get('doc_name', doc_id) if doc_clauses else doc_id
+                clauses_text += f"=== DOCUMENT: {doc_name} ===\n"
+                
+                for clause in doc_clauses:
+                    clause_order = clause.get('order', 1)
+                    clause_category = clause.get('category', 'Unknown')
+                    clauses_text += f"Clause {clause_order} ({clause_category}):\n"
+                    clauses_text += f"Summary: {clause.get('summary', '')}\n"
+                    clauses_text += f"Original: {clause.get('original_text', '')[:500]}...\n\n"
+                
+                clauses_text += "\n"
+        else:
+            # Single document - use original format
+            clauses_text = "CLAUSES:\n"
+            for i, clause in enumerate(relevant_clauses):
+                clause_order = clause.get('order', i + 1)
+                clause_category = clause.get('category', 'Unknown')
+                clauses_text += f"Clause {clause_order} ({clause_category}):\n"
+                clauses_text += f"Summary: {clause.get('summary', '')}\n"
+                clauses_text += f"Original: {clause.get('original_text', '')[:500]}...\n\n"
 
         # Language-specific response format examples
         language_examples = {
