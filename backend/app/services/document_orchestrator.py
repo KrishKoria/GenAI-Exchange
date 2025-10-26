@@ -80,7 +80,7 @@ class DocumentOrchestrator:
                 # Stage 1: Document Processing (Text Extraction)
                 logger.info("Stage 1: Document text extraction")
                 document_data = await self.document_processor.process_document(
-                    file_content, filename, use_fallback=False
+                    file_content, filename, use_fallback=True
                 )
                 processing_result["stages_completed"].append("text_extraction")
                 
