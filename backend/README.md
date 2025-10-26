@@ -14,27 +14,32 @@ AI-powered legal document analysis and risk assessment backend service built wit
 ### Installation
 
 1. **Clone and navigate to backend directory**
+
 ```bash
 cd backend
 ```
 
 2. **Install dependencies with Poetry**
+
 ```bash
 poetry install
 ```
 
 3. **Set up environment variables**
+
 ```bash
 cp .env.example .env
 # Edit .env with your GCP credentials and configuration
 ```
 
 4. **Activate virtual environment**
+
 ```bash
 poetry shell
 ```
 
 5. **Run the development server**
+
 ```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
@@ -123,8 +128,13 @@ SECRET_KEY=your-secret-key
 # Optional (with defaults)
 GEMINI_MODEL_NAME=gemini-1.5-flash
 MAX_FILE_SIZE_MB=10
-MAX_PAGES=10
+MAX_PAGES=30
+
+# AI Features
+GEMINI_GROUNDING_ENABLED=true  # Enable Google Search grounding for up-to-date information
 ```
+
+**Gemini Grounding**: When enabled, the AI model can search the internet to provide more accurate, up-to-date responses. This is particularly useful for questions about recent events, current regulations, or evolving legal standards. Disable this if you want purely document-based analysis without external information.
 
 ### GCP Service Account Permissions
 

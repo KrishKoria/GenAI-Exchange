@@ -4,88 +4,25 @@ import {
   fetchMetricsTrends,
   fetchMetricsDetails,
 } from "@/lib/api";
+import type { UseAnalyticsHookReturn } from "@/types/analytics";
 
-interface MetricsSummary {
-  total_documents: number;
-  total_clauses: number;
-  total_questions: number;
-  total_risks: number;
-  avg_processing_time_ms: number;
-  avg_response_time_ms: number;
-  avg_confidence: number;
-  high_risk_percentage: number;
-  period_start: string;
-  period_end: string;
-  last_updated: string;
-}
-
-interface TrendDataPoint {
-  timestamp: string;
-  value: number;
-  label: string;
-}
-
-interface EventTypeTrend {
-  event_type: string;
-  data_points: TrendDataPoint[];
-  total_count: number;
-}
-
-interface MetricsTrends {
-  event_trends: EventTypeTrend[];
-  processing_time_trend: TrendDataPoint[];
-  response_time_trend: TrendDataPoint[];
-  confidence_trend: TrendDataPoint[];
-  risk_distribution: Record<string, number>;
-  category_distribution: Record<string, number>;
-  period_start: string;
-  period_end: string;
-  granularity: string;
-}
-
-interface CategoryBreakdown {
-  category: string;
-  count: number;
-  avg_risk_score: number;
-  high_risk_count: number;
-}
-
-interface RiskDistribution {
-  low: number;
-  moderate: number;
-  attention: number;
-  total: number;
-}
-
-interface MetricsDetails {
-  summary: MetricsSummary;
-  risk_distribution: RiskDistribution;
-  top_categories: CategoryBreakdown[];
-  recent_documents: unknown[];
-  recent_high_risks: unknown[];
-  last_updated: string;
-}
-
-interface AnalyticsData {
-  summary: MetricsSummary | null;
-  trends: MetricsTrends | null;
-  details: MetricsDetails | null;
-  isLoading: boolean;
-  error: Error | null;
-  refetch: () => void;
-}
-
-export function useAnalytics(hours: number = 24): AnalyticsData {
+export function useAnalytics(hours: number = 24): UseAnalyticsHookReturn {
   // Fetch summary metrics
   const {
     data: summary,
     isLoading: summaryLoading,
+    isFetching: summaryFetching,
     error: summaryError,
     refetch: refetchSummary,
+    dataUpdatedAt: summaryUpdatedAt,
   } = useQuery({
     queryKey: ["analytics", "summary", hours],
     queryFn: () => fetchMetricsSummary(hours),
-    refetchInterval: 30000, // Auto-refresh every 30 seconds
+    // T008: Page Visibility API integration - pause refetch when tab hidden
+    refetchInterval: () =>
+      typeof window !== "undefined" && document.visibilityState === "visible"
+        ? 30000
+        : false,
     staleTime: 20000,
   });
 
@@ -93,11 +30,16 @@ export function useAnalytics(hours: number = 24): AnalyticsData {
   const {
     data: trends,
     isLoading: trendsLoading,
+    isFetching: trendsFetching,
     error: trendsError,
+    dataUpdatedAt: trendsUpdatedAt,
   } = useQuery({
     queryKey: ["analytics", "trends", hours],
     queryFn: () => fetchMetricsTrends(hours, hours > 48 ? "daily" : "hourly"),
-    refetchInterval: 30000,
+    refetchInterval: () =>
+      typeof window !== "undefined" && document.visibilityState === "visible"
+        ? 30000
+        : false,
     staleTime: 20000,
   });
 
@@ -105,16 +47,30 @@ export function useAnalytics(hours: number = 24): AnalyticsData {
   const {
     data: details,
     isLoading: detailsLoading,
+    isFetching: detailsFetching,
     error: detailsError,
+    dataUpdatedAt: detailsUpdatedAt,
   } = useQuery({
     queryKey: ["analytics", "details", hours],
     queryFn: () => fetchMetricsDetails(hours),
-    refetchInterval: 30000,
+    refetchInterval: () =>
+      typeof window !== "undefined" && document.visibilityState === "visible"
+        ? 30000
+        : false,
     staleTime: 20000,
   });
 
   const isLoading = summaryLoading || trendsLoading || detailsLoading;
+  const isFetching = summaryFetching || trendsFetching || detailsFetching;
   const error = summaryError || trendsError || detailsError;
+
+  // Calculate lastUpdated from the most recent dataUpdatedAt
+  const mostRecentUpdate = Math.max(
+    summaryUpdatedAt || 0,
+    trendsUpdatedAt || 0,
+    detailsUpdatedAt || 0
+  );
+  const lastUpdated = mostRecentUpdate > 0 ? new Date(mostRecentUpdate) : null;
 
   const refetch = () => {
     refetchSummary();
@@ -125,7 +81,9 @@ export function useAnalytics(hours: number = 24): AnalyticsData {
     trends: trends || null,
     details: details || null,
     isLoading,
+    isFetching,
     error: error as Error | null,
     refetch,
+    lastUpdated,
   };
 }
