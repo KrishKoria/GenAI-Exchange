@@ -25,12 +25,13 @@ LegalEase AI provides:
 
 - **Smart OCR**: Google Document AI integration with PyPDF2 fallback
 - **Clause Segmentation**: Intelligent clause detection and categorization
-- **Batch Processing**: Efficient processing of up to 10-page documents
+- **Batch Processing**: Efficient processing of up to 30-page documents
 - **Privacy Protection**: PII detection and masking with Google DLP API
 
 ### 🎯 AI-Powered Analysis
 
-- **Gemini Integration**: Advanced summarization using Google's Gemini models
+- **Gemini Integration**: Advanced summarization using Google's Gemini 2.5-flash models
+- **Google Search Grounding**: Optional internet search integration for up-to-date legal context and regulations
 - **Hybrid Risk Assessment**: Keyword-based heuristics + LLM analysis
 - **Readability Metrics**: Flesch-Kincaid, Gunning Fog, SMOG index calculations
 - **Confidence Scoring**: Transparent AI confidence levels

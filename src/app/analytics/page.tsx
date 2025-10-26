@@ -2,24 +2,16 @@
 
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
-import {
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from "recharts";
+import { Button } from "@/components/ui/button";
 import { useAnalytics } from "@/hooks/useAnalytics";
+import { formatTimestamp } from "@/lib/chart-data-transforms";
+import { DocumentTrendChart } from "@/components/analytics/DocumentTrendChart";
+import { RiskDistributionChart } from "@/components/analytics/RiskDistributionChart";
+import { CategoryBreakdownChart } from "@/components/analytics/CategoryBreakdownChart";
+import { AnalyticsSkeleton } from "@/components/analytics/AnalyticsSkeleton";
+import { RISK_COLORS } from "@/types/analytics";
 
-const COLORS = ["#10b981", "#f59e0b", "#ef4444"];
+const COLORS = [RISK_COLORS.low, RISK_COLORS.moderate, RISK_COLORS.attention];
 const RISK_LABELS: Record<string, string> = {
   low: "Low Risk",
   moderate: "Moderate Risk",
@@ -28,17 +20,24 @@ const RISK_LABELS: Record<string, string> = {
 
 export default function AnalyticsPage() {
   const [timeRange, setTimeRange] = useState<24 | 168>(24); // 24h or 7d
-  const { summary, trends, details, isLoading, error } =
-    useAnalytics(timeRange);
+  const {
+    summary,
+    trends,
+    details,
+    isLoading,
+    isFetching,
+    error,
+    lastUpdated,
+  } = useAnalytics(timeRange);
 
   if (error) {
     return (
-      <div className="container mx-auto p-6">
-        <Card className="p-6 bg-red-50 border-red-200">
-          <h2 className="text-lg font-semibold text-red-900 mb-2">
+      <div className="container mx-auto p-6 bg-[#0B0B0B] min-h-screen">
+        <Card className="p-6 bg-red-950 border-red-900">
+          <h2 className="text-lg font-semibold text-red-200 mb-2">
             Error Loading Analytics
           </h2>
-          <p className="text-red-700">{error.message}</p>
+          <p className="text-red-300">{error.message}</p>
         </Card>
       </div>
     );
@@ -85,196 +84,128 @@ export default function AnalyticsPage() {
       })) || [];
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <div className="container mx-auto p-6 space-y-6 relative bg-[#0B0B0B] text-white min-h-screen">
+      {/* Loading Overlay - shows during background refetch */}
+      {isFetching && !isLoading && (
+        <div className="absolute top-6 right-6 z-10">
+          <div className="bg-primary text-primary-foreground px-4 py-2 rounded-md shadow-lg flex items-center gap-2">
+            <div className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full"></div>
+            <span className="text-sm font-medium">Updating...</span>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-3xl font-bold">Analytics Dashboard</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-3xl font-bold text-white">Analytics Dashboard</h1>
+          <p className="text-gray-400">
             Real-time insights into document processing and risk analysis
           </p>
         </div>
 
         {/* Time Range Selector */}
         <div className="flex gap-2">
-          <button
+          <Button
             onClick={() => setTimeRange(24)}
-            className={`px-4 py-2 rounded-md ${
+            variant={timeRange === 24 ? "default" : "outline"}
+            className={
               timeRange === 24
-                ? "bg-primary text-primary-foreground"
-                : "bg-secondary"
-            }`}
+                ? "bg-white text-black hover:bg-gray-100"
+                : "border-zinc-700 text-gray-300 hover:bg-zinc-800 hover:text-white"
+            }
           >
             Last 24 Hours
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => setTimeRange(168)}
-            className={`px-4 py-2 rounded-md ${
+            variant={timeRange === 168 ? "default" : "outline"}
+            className={
               timeRange === 168
-                ? "bg-primary text-primary-foreground"
-                : "bg-secondary"
-            }`}
+                ? "bg-white text-black hover:bg-gray-100"
+                : "border-zinc-700 text-gray-300 hover:bg-zinc-800 hover:text-white"
+            }
           >
             Last 7 Days
-          </button>
+          </Button>
         </div>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="p-6">
-          <div className="text-sm font-medium text-muted-foreground">
-            Documents Processed
-          </div>
-          <div className="text-3xl font-bold mt-2">
-            {isLoading ? "..." : summary?.total_documents || 0}
-          </div>
-          <p className="text-xs text-muted-foreground mt-1">
-            {summary?.total_clauses || 0} clauses analyzed
-          </p>
-        </Card>
+      {isLoading ? (
+        <AnalyticsSkeleton variant="metric-card" count={4} />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card className="p-6 !bg-zinc-900 !border-zinc-800">
+            <div className="text-sm font-medium text-gray-400">
+              Documents Processed
+            </div>
+            <div className="text-3xl font-bold mt-2 text-white">
+              {summary?.total_documents || 0}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              {summary?.total_clauses || 0} clauses analyzed
+            </p>
+          </Card>
 
-        <Card className="p-6">
-          <div className="text-sm font-medium text-muted-foreground">
-            Questions Asked
-          </div>
-          <div className="text-3xl font-bold mt-2">
-            {isLoading ? "..." : summary?.total_questions || 0}
-          </div>
-          <p className="text-xs text-muted-foreground mt-1">
-            Avg confidence:{" "}
-            {summary ? (summary.avg_confidence * 100).toFixed(1) : "0"}%
-          </p>
-        </Card>
+          <Card className="p-6 !bg-zinc-900 !border-zinc-800">
+            <div className="text-sm font-medium text-gray-400">
+              Questions Asked
+            </div>
+            <div className="text-3xl font-bold mt-2 text-white">
+              {summary?.total_questions || 0}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Avg confidence:{" "}
+              {summary ? (summary.avg_confidence * 100).toFixed(1) : "0"}%
+            </p>
+          </Card>
 
-        <Card className="p-6">
-          <div className="text-sm font-medium text-muted-foreground">
-            High-Risk Clauses
-          </div>
-          <div className="text-3xl font-bold mt-2 text-red-600">
-            {isLoading ? "..." : summary?.total_risks || 0}
-          </div>
-          <p className="text-xs text-muted-foreground mt-1">
-            {summary ? summary.high_risk_percentage.toFixed(1) : "0"}% of total
-          </p>
-        </Card>
+          <Card className="p-6 !bg-zinc-900 !border-zinc-800">
+            <div className="text-sm font-medium text-gray-400">
+              High-Risk Clauses
+            </div>
+            <div className="text-3xl font-bold mt-2 text-red-500">
+              {summary?.total_risks || 0}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              {summary ? summary.high_risk_percentage.toFixed(1) : "0"}% of
+              total
+            </p>
+          </Card>
 
-        <Card className="p-6">
-          <div className="text-sm font-medium text-muted-foreground">
-            Avg Processing Time
-          </div>
-          <div className="text-3xl font-bold mt-2">
-            {isLoading
-              ? "..."
-              : summary
-              ? (summary.avg_processing_time_ms / 1000).toFixed(1)
-              : "0"}
-            s
-          </div>
-          <p className="text-xs text-muted-foreground mt-1">
-            Q&A:{" "}
-            {summary ? (summary.avg_response_time_ms / 1000).toFixed(1) : "0"}s
-          </p>
-        </Card>
-      </div>
+          <Card className="p-6 !bg-zinc-900 !border-zinc-800">
+            <div className="text-sm font-medium text-gray-400">
+              Avg Processing Time
+            </div>
+            <div className="text-3xl font-bold mt-2 text-white">
+              {summary
+                ? (summary.avg_processing_time_ms / 1000).toFixed(1)
+                : "0"}
+              s
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Q&A:{" "}
+              {summary ? (summary.avg_response_time_ms / 1000).toFixed(1) : "0"}
+              s
+            </p>
+          </Card>
+        </div>
+      )}
 
       {/* Charts Row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Document Upload Trend */}
-        <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-4">Document Upload Trend</h3>
-          {isLoading ? (
-            <div className="h-64 flex items-center justify-center text-muted-foreground">
-              Loading...
-            </div>
-          ) : eventTrendData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={eventTrendData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="label" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="documents"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-64 flex items-center justify-center text-muted-foreground">
-              No data available
-            </div>
-          )}
-        </Card>
-
-        {/* Risk Distribution */}
-        <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-4">Risk Distribution</h3>
-          {isLoading ? (
-            <div className="h-64 flex items-center justify-center text-muted-foreground">
-              Loading...
-            </div>
-          ) : riskData.length > 0 && riskData.some((d) => d.value > 0) ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={riskData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={(entry) => `${entry.name}: ${entry.value}`}
-                  outerRadius={80}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  {riskData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-64 flex items-center justify-center text-muted-foreground">
-              No risk data available
-            </div>
-          )}
-        </Card>
+        <DocumentTrendChart data={eventTrendData} isLoading={isLoading} />
+        <RiskDistributionChart data={riskData} isLoading={isLoading} />
       </div>
 
       {/* Category Breakdown */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold mb-4">Top Clause Categories</h3>
-        {isLoading ? (
-          <div className="h-80 flex items-center justify-center text-muted-foreground">
-            Loading...
-          </div>
-        ) : categoryData.length > 0 ? (
-          <ResponsiveContainer width="100%" height={400}>
-            <BarChart data={categoryData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="count" fill="#3b82f6" name="Clause Count" />
-            </BarChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="h-80 flex items-center justify-center text-muted-foreground">
-            No category data available
-          </div>
-        )}
-      </Card>
+      <CategoryBreakdownChart data={categoryData} isLoading={isLoading} />
 
       {/* Last Updated */}
-      {summary && (
-        <p className="text-xs text-muted-foreground text-center">
-          Last updated: {new Date(summary.last_updated).toLocaleString()}
+      {lastUpdated && (
+        <p className="text-xs text-gray-500 text-center">
+          Last updated: {formatTimestamp(lastUpdated.toISOString())}
         </p>
       )}
     </div>
